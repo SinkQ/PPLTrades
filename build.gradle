@@ -1,0 +1,98 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version '1.19-SNAPSHOT'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = "Modrinth"
+                url = "https://api.modrinth.com/maven"
+            }
+        }
+        filter {
+            includeGroup "maven.modrinth"
+        }
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // Опциональная интеграция: нужна только для компиляции, в мод не встраивается
+    compileOnly "maven.modrinth:jei:${project.jei_version}"
+}
+
+processResources {
+    inputs.property "version", project.version
+    inputs.property "minecraft_version", project.minecraft_version
+    inputs.property "loader_version", project.loader_version
+    filteringCharset "UTF-8"
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version,
+                "minecraft_version": project.minecraft_version,
+                "loader_version": project.loader_version
+    }
+}
+
+def targetJavaVersion = 25
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release.set(targetJavaVersion)
+}
+
+java {
+    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
+    if (JavaVersion.current() < javaVersion) {
+        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    withSourcesJar()
+}
+
+tasks.register('testSignSearchMasks', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ru.sink_q.ppltrades.SignSearchMaskTest'
+}
+
+tasks.register('signSearchCoverage', JavaExec) {
+    group = 'verification'
+    description = 'Audits local/test-only sign search coverage against a JSONL export.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ru.sink_q.ppltrades.SignSearchCoverage'
+    doFirst {
+        def signsFile = project.findProperty('signsFile')
+        if (signsFile == null || signsFile.toString().isBlank()) {
+            throw new GradleException("Specify the JSONL export with -PsignsFile=<path>")
+        }
+        args '--signsFile', signsFile.toString()
+        ['signAliasesFile', 'signNamesFile'].each { propertyName ->
+            def value = project.findProperty(propertyName)
+            if (value != null && !value.toString().isBlank()) {
+                args "--${propertyName}", value.toString()
+            }
+        }
+    }
+}
+
+tasks.named('test') {
+    // Проверки масок запускаются обычным Java main, без зависимости от JUnit.
+    failOnNoDiscoveredTests = false
+    dependsOn 'testSignSearchMasks'
+}
+
+jar {
+    from("LICENSE.txt") {
+        rename { "${it}_${project.archives_base_name}" }
+    }
+}

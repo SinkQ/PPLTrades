@@ -1,0 +1,38 @@
+{
+  "key.category.ppltrades.main": "PPLTrades",
+  "key.ppltrades.sign_search": "Search item on signs (Pochatok)",
+
+  "ppltrades.tooltip.category": "Category: %s",
+  "ppltrades.tooltip.category.none": "none",
+
+  "ppltrades.tooltip.price.header.piece": "Price per item, diamonds",
+  "ppltrades.tooltip.price.header.stack": "Price per stack (%s), diamonds",
+  "ppltrades.tooltip.price.col.median": "median",
+  "ppltrades.tooltip.price.col.min": "min",
+  "ppltrades.tooltip.price.col.avg": "avg",
+  "ppltrades.tooltip.price.col.n": "listings",
+  "ppltrades.tooltip.price.window.hour": "Hour",
+  "ppltrades.tooltip.price.window.day": "Day",
+  "ppltrades.tooltip.price.window.week": "Week",
+  "ppltrades.tooltip.price.window_lower.hour": "hour",
+  "ppltrades.tooltip.price.window_lower.day": "day",
+  "ppltrades.tooltip.price.window_lower.week": "week",
+  "ppltrades.tooltip.price.window.range": "%s–%s",
+  "ppltrades.tooltip.price.none": "Prices: no data",
+
+  "ppltrades.message.no_pochatok": "The Pochatok mod is required to search signs",
+  "ppltrades.message.no_signsearchmask": "Pochatok's regex search command isn't available. Check the installed version.",
+  "ppltrades.message.searching_signs": "Searching signs for: %s",
+
+  "ppltrades.category.server-currency": "Server Currency",
+  "ppltrades.category.prohibited-sales": "Sale Prohibited",
+  "ppltrades.category.blocks": "Blocks",
+  "ppltrades.category.armor-and-tools": "Armor & Tools",
+  "ppltrades.category.gallery": "Gallery",
+  "ppltrades.category.food-and-potions": "Food & Potions",
+  "ppltrades.category.books": "Books",
+  "ppltrades.category.dyes-and-plants": "Dyes & Plants",
+  "ppltrades.category.mob-drops": "Mob Drops",
+  "ppltrades.category.miscellaneous": "Miscellaneous",
+  "ppltrades.category.valuables": "Valuables"
+}

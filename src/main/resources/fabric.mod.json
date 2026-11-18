@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "ppltrades",
+  "version": "${version}",
+  "name": "PPLTrades",
+  "description": "PepeLand trading helper: trading zone category and crowd-sourced shop prices in item tooltips (hold Shift), sign search for the hovered item with Pochatok (N key).",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "ru.sink_q.ppltrades.Ppltrades"
+    ],
+    "jei_mod_plugin": [
+      "ru.sink_q.ppltrades.compat.jei.PpltradesJeiPlugin"
+    ]
+  },
+  "mixins": [
+    "ppltrades.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  },
+  "suggests": {
+    "pochatok": "*",
+    "jei": "*"
+  }
+}

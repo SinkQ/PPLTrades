@@ -1,0 +1,38 @@
+{
+  "key.category.ppltrades.main": "PPLTrades",
+  "key.ppltrades.sign_search": "Искать предмет по табличкам (Pochatok)",
+
+  "ppltrades.tooltip.category": "Категория: %s",
+  "ppltrades.tooltip.category.none": "не указана",
+
+  "ppltrades.tooltip.price.header.piece": "Цена за 1 шт, алм",
+  "ppltrades.tooltip.price.header.stack": "Цена за стак (%s), алм",
+  "ppltrades.tooltip.price.col.median": "мед",
+  "ppltrades.tooltip.price.col.min": "мин",
+  "ppltrades.tooltip.price.col.avg": "ср",
+  "ppltrades.tooltip.price.col.n": "лотов",
+  "ppltrades.tooltip.price.window.hour": "Час",
+  "ppltrades.tooltip.price.window.day": "День",
+  "ppltrades.tooltip.price.window.week": "Неделя",
+  "ppltrades.tooltip.price.window_lower.hour": "час",
+  "ppltrades.tooltip.price.window_lower.day": "день",
+  "ppltrades.tooltip.price.window_lower.week": "неделя",
+  "ppltrades.tooltip.price.window.range": "%s–%s",
+  "ppltrades.tooltip.price.none": "Цены: нет данных",
+
+  "ppltrades.message.no_pochatok": "Для поиска по табличкам нужен мод Pochatok",
+  "ppltrades.message.no_signsearchmask": "Pochatok не зарегистрировал команду поиска по маске. Проверьте версию мода.",
+  "ppltrades.message.searching_signs": "Поиск по табличкам: %s",
+
+  "ppltrades.category.server-currency": "Валюта сервера",
+  "ppltrades.category.prohibited-sales": "Продажа запрещена",
+  "ppltrades.category.blocks": "Блоки",
+  "ppltrades.category.armor-and-tools": "Броня и инструменты",
+  "ppltrades.category.gallery": "Галерея",
+  "ppltrades.category.food-and-potions": "Еда и зелья",
+  "ppltrades.category.books": "Книжки",
+  "ppltrades.category.dyes-and-plants": "Краски и растения",
+  "ppltrades.category.mob-drops": "Лут с мобов",
+  "ppltrades.category.miscellaneous": "Разное",
+  "ppltrades.category.valuables": "Ценности"
+}
