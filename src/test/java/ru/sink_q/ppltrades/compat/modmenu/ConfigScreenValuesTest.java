@@ -1,24 +1,34 @@
 package ru.sink_q.ppltrades.compat.modmenu;
 
+import ru.sink_q.ppltrades.PpltradesConfig;
+
 import java.util.List;
 import java.util.Map;
 
 public final class ConfigScreenValuesTest {
     public static void main(String[] args) {
-        for (String url : List.of("", "   ", " https://example.org:8443/api/ ", "http://localhost:8080")) {
+        for (String url : List.of("", "   ", " https://example.org:8443/api/ ", "https://localhost:8080",
+                "https://example.org:65535")) {
             if (!PpltradesConfigScreen.validUrl(url)) {
                 throw new AssertionError("Rejected valid URL: " + url);
             }
         }
         for (String url : List.of("/", "example.org", "https://", "https://example.org?mode=1",
                 "https://example.org#prices", "ftp://example.org", "https://example.org:65536",
-                "https://example.org:0", "https://name@example.org", "https://example.org/a b")) {
+                "https://example.org:0", "https://example.org:", "https://name@example.org",
+                "http://localhost:8080", "https://example.org/a b")) {
             if (PpltradesConfigScreen.validUrl(url)) {
                 throw new AssertionError("Accepted invalid URL: " + url);
             }
         }
+        if (PpltradesConfig.isSecureApiUrl("") || PpltradesConfig.isSecureApiUrl("  ")
+                || !PpltradesConfig.isSecureApiUrl("https://example.org/api")
+                || PpltradesConfig.isSecureApiUrl("http://example.org")) {
+            throw new AssertionError("HTTPS base URL validation did not distinguish secure URLs from blank/HTTP");
+        }
 
-        for (String proxy : List.of("system", "none", " ", "127.0.0.1:10808", "http://127.0.0.1:7890")) {
+        for (String proxy : List.of("system", "none", " ", "127.0.0.1:10808", "http://127.0.0.1:7890",
+                "https://proxy.example.org:443")) {
             if (!PpltradesConfigScreen.validProxy(proxy)) {
                 throw new AssertionError("Rejected valid proxy: " + proxy);
             }

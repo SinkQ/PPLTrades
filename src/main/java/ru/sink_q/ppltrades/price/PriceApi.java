@@ -14,7 +14,6 @@ import ru.sink_q.ppltrades.PpltradesConfig;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -59,8 +58,8 @@ public final class PriceApi {
     private static volatile Map<String, Map<PriceStats.Window, PriceStats.Trend>> prices = Map.of();
 
     // доступ только из сетевого потока
-    private static String token;
-    private static long tokenExpiresAtMs;
+    private record Session(String base, String token, long expiresAtMs) {}
+    private static Session session;
     private static long authBlockedUntilMs;
     private static boolean unreachableNotified;
 
@@ -133,14 +132,24 @@ public final class PriceApi {
         }
         EXECUTOR.execute(() -> {
             try {
-                while (PpltradesConfig.get().collectPrices && !QUEUE.isEmpty()) {
+                while (PpltradesConfig.get().collectPrices && tradingWorlds != null && !QUEUE.isEmpty()) {
                     List<JsonObject> batch = new ArrayList<>();
                     JsonObject item;
                     while (batch.size() < MAX_BATCH && (item = QUEUE.poll()) != null) {
-                        batch.add(item);
+                        JsonElement world = item.get("world");
+                        if (world != null && world.isJsonPrimitive() && isTradingWorld(world.getAsString())) {
+                            batch.add(item);
+                        }
                     }
-                    if (!sendBatch(serverAddress, batch)) {
-                        break;
+                    if (!batch.isEmpty()) {
+                        try {
+                            if (!sendBatch(serverAddress, batch)) {
+                                break;
+                            }
+                        } catch (Exception e) {
+                            requeue(batch);
+                            throw e;
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -151,14 +160,14 @@ public final class PriceApi {
         });
     }
 
-    /** Миры, в которых собираются цены (с сервера). Пусто = сервер не ограничивает, собираем везде. */
-    private static volatile Set<String> tradingWorlds = Set.of();
+    /** Пока список не получен (или если он пуст), никакие миры не разрешены. */
+    private static volatile Set<String> tradingWorlds;
     private static final AtomicBoolean CONFIG_FETCHING = new AtomicBoolean();
 
-    /** Можно ли собирать бочки в этом мире. Неизвестный мир (null) — нет, если список задан. */
+    /** Можно ли собирать бочки в этом мире. */
     public static boolean isTradingWorld(String worldId) {
         Set<String> worlds = tradingWorlds;
-        return worlds.isEmpty() || (worldId != null && worlds.contains(worldId));
+        return worlds != null && worldId != null && worlds.contains(worldId);
     }
 
     /**
@@ -192,8 +201,14 @@ public final class PriceApi {
                 if (response.statusCode() == 200) {
                     Set<String> worlds = new HashSet<>();
                     JsonElement list = JsonParser.parseString(response.body()).getAsJsonObject().get("tradingWorlds");
-                    if (list != null && list.isJsonArray()) {
-                        list.getAsJsonArray().forEach(w -> worlds.add(w.getAsString().toLowerCase(java.util.Locale.ROOT)));
+                    if (list == null || !list.isJsonArray()) {
+                        return;
+                    }
+                    for (JsonElement w : list.getAsJsonArray()) {
+                        if (!w.isJsonPrimitive() || !w.getAsString().matches("[0-9a-fA-F]{1,16}")) {
+                            return;
+                        }
+                        worlds.add(w.getAsString().toLowerCase(java.util.Locale.ROOT));
                     }
                     tradingWorlds = Set.copyOf(worlds);
                 }
@@ -275,7 +290,17 @@ public final class PriceApi {
         batch.forEach(reports::add);
         body.add("reports", reports);
 
-        HttpResponse<String> response = post("/v1/reports", body, true);
+        HttpResponse<String> response;
+        try {
+            response = post(session.base(), "/v1/reports", body, session.token());
+        } catch (java.io.IOException e) {
+            forgetToken(); // следующее подключение может выбрать другое зеркало, но получит новый токен
+            throw e;
+        }
+        if (response.statusCode() >= 500) {
+            requeue(batch);
+            return false;
+        }
         switch (response.statusCode()) {
             case 200 -> {
                 return true;
@@ -291,7 +316,7 @@ public final class PriceApi {
             }
             default -> {
                 // 400/403 и т.п.: повторять бессмысленно, отбрасываем пачку
-                Ppltrades.LOGGER.warn("Сервер цен отклонил отчёт: {} {}", response.statusCode(), response.body());
+                Ppltrades.LOGGER.warn("Сервер цен отклонил отчёт: HTTP {}", response.statusCode());
                 return true;
             }
         }
@@ -306,16 +331,17 @@ public final class PriceApi {
     }
 
     /**
-     * Получить токен бэкенда: бэкенд выдаёт случайный serverId, клиент регистрирует "вход" с ним на сессионном
-     * сервере Mojang (как при подключении к серверу), бэкенд проверяет это через hasJoined.
+     * Клиент сам вычисляет подтверждение для Mojang из запроса бэкенда и собственного случайного числа.
+     * Один адрес обслуживает подтверждение, выдачу токена и дальнейшую отправку отчётов.
      * Так подтверждается, что отчёты шлёт владелец лицензионного аккаунта.
      */
     private static boolean ensureToken() throws Exception {
         long now = System.currentTimeMillis();
-        if (token == null) {
+        if (session == null) {
             loadSavedToken();
         }
-        if (token != null && now < tokenExpiresAtMs - 5 * 60 * 1000L) {
+        if (session != null && ApiTransport.baseUrls().contains(session.base())
+                && now < session.expiresAtMs() - 5 * 60 * 1000L) {
             return true;
         }
         if (now < authBlockedUntilMs) {
@@ -323,26 +349,34 @@ public final class PriceApi {
         }
 
         try {
-            HttpResponse<String> challenge = get("/v1/auth/challenge");
+            ApiTransport.Response answered = send(null, base -> request(base, "/v1/auth/challenge").GET().build());
+            HttpResponse<String> challenge = answered.http();
             if (challenge.statusCode() != 200) {
                 throw new IllegalStateException("challenge: HTTP " + challenge.statusCode());
             }
-            String serverId = JsonParser.parseString(challenge.body()).getAsJsonObject().get("serverId").getAsString();
+            JsonObject auth = JsonParser.parseString(challenge.body()).getAsJsonObject();
+            if (!auth.has("authVersion") || auth.get("authVersion").getAsInt() != AuthProof.VERSION) {
+                throw new IllegalStateException("Сервис цен не поддерживает безопасное подтверждение PPLTrades");
+            }
+            String serverId = auth.get("serverId").getAsString();
+            String nonce = AuthProof.newNonce();
+            String proof = AuthProof.derive(serverId, nonce);
 
             Minecraft mc = Minecraft.getInstance();
             User user = mc.getUser();
-            mc.services().sessionService().joinServer(user.getProfileId(), user.getAccessToken(), serverId);
+            mc.services().sessionService().joinServer(user.getProfileId(), user.getAccessToken(), proof);
 
             JsonObject body = new JsonObject();
             body.addProperty("username", user.getName());
             body.addProperty("serverId", serverId);
-            HttpResponse<String> verify = post("/v1/auth/verify", body, false);
+            body.addProperty("clientNonce", nonce);
+            HttpResponse<String> verify = post(answered.base(), "/v1/auth/verify", body, null);
             if (verify.statusCode() != 200) {
-                throw new IllegalStateException("verify: HTTP " + verify.statusCode() + " " + verify.body());
+                throw new IllegalStateException("verify: HTTP " + verify.statusCode());
             }
             JsonObject result = JsonParser.parseString(verify.body()).getAsJsonObject();
-            token = result.get("token").getAsString();
-            tokenExpiresAtMs = result.get("expiresAt").getAsLong() * 1000L;
+            session = new Session(answered.base(), result.get("token").getAsString(),
+                    Math.multiplyExact(result.get("expiresAt").getAsLong(), 1000L));
             saveToken();
             return true;
         } catch (Exception e) {
@@ -360,10 +394,13 @@ public final class PriceApi {
                 return;
             }
             JsonObject saved = JsonParser.parseString(Files.readString(TOKEN_FILE, StandardCharsets.UTF_8)).getAsJsonObject();
+            if (!saved.has("authVersion") || saved.get("authVersion").getAsInt() != AuthProof.VERSION) {
+                return;
+            }
+            String base = saved.get("apiUrl").getAsString();
             if (saved.get("uuid").getAsString().equals(Minecraft.getInstance().getUser().getProfileId().toString())
-                    && saved.get("apiUrl").getAsString().equals(PpltradesConfig.activeApiUrl())) {
-                token = saved.get("token").getAsString();
-                tokenExpiresAtMs = saved.get("expiresAtMs").getAsLong();
+                    && ApiTransport.baseUrls().contains(base)) {
+                session = new Session(base, saved.get("token").getAsString(), saved.get("expiresAtMs").getAsLong());
             }
         } catch (Exception e) {
             Ppltrades.LOGGER.warn("Не удалось прочитать сохранённый токен: {}", e.toString());
@@ -374,9 +411,10 @@ public final class PriceApi {
         try {
             JsonObject saved = new JsonObject();
             saved.addProperty("uuid", Minecraft.getInstance().getUser().getProfileId().toString());
-            saved.addProperty("apiUrl", PpltradesConfig.activeApiUrl());
-            saved.addProperty("token", token);
-            saved.addProperty("expiresAtMs", tokenExpiresAtMs);
+            saved.addProperty("authVersion", AuthProof.VERSION);
+            saved.addProperty("apiUrl", session.base());
+            saved.addProperty("token", session.token());
+            saved.addProperty("expiresAtMs", session.expiresAtMs());
             Files.writeString(TOKEN_FILE, GSON.toJson(saved), StandardCharsets.UTF_8);
         } catch (Exception e) {
             Ppltrades.LOGGER.warn("Не удалось сохранить токен: {}", e.toString());
@@ -384,35 +422,35 @@ public final class PriceApi {
     }
 
     private static void forgetToken() {
-        token = null;
+        session = null;
         try {
             Files.deleteIfExists(TOKEN_FILE);
         } catch (Exception ignored) {
         }
     }
 
-    private static HttpResponse<String> post(String path, JsonObject body, boolean auth) throws Exception {
+    private static HttpResponse<String> post(String pinnedBase, String path, JsonObject body, String bearer) throws Exception {
         String json = GSON.toJson(body);
-        String bearer = token;
-        return send(base -> {
+        return send(pinnedBase, base -> {
             HttpRequest.Builder builder = request(base, path)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8));
-            if (auth) {
+            if (bearer != null) {
                 builder.header("Authorization", "Bearer " + bearer);
             }
             return builder.build();
-        });
+        }).http();
     }
 
     private static HttpResponse<String> get(String path) throws Exception {
-        return send(base -> request(base, path).GET().build());
+        return send(null, base -> request(base, path).GET().build()).http();
     }
 
     /** Запрос через ApiTransport (зеркала, прокси); при полной недоступности — подсказка игроку. */
-    private static HttpResponse<String> send(java.util.function.Function<String, HttpRequest> request) throws Exception {
+    private static ApiTransport.Response send(String pinnedBase,
+            java.util.function.Function<String, HttpRequest> request) throws java.io.IOException, InterruptedException {
         try {
-            HttpResponse<String> response = ApiTransport.send(request);
+            ApiTransport.Response response = ApiTransport.send(pinnedBase, request);
             unreachableNotified = false;
             failures = 0;
             retryAtMs = 0;

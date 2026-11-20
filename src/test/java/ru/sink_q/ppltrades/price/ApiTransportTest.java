@@ -8,6 +8,19 @@ public final class ApiTransportTest {
     private static int failures;
 
     public static void main(String[] args) {
+        String challenge = "0123456789abcdef0123456789abcdef01234567";
+        String nonce = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+        if (!"9adc201261739e42e1bee1e8eb5d91ec5d7de7c3".equals(AuthProof.derive(challenge, nonce))
+                || !AuthProof.newNonce().matches("[0-9a-f]{64}")
+                || AuthProof.derive(challenge, AuthProof.newNonce()).equals(AuthProof.derive(challenge, nonce))) {
+            throw new AssertionError("Unexpected Mojang proof or nonce");
+        }
+        try {
+            AuthProof.derive("invalid", nonce);
+            throw new AssertionError("Invalid challenge accepted");
+        } catch (IllegalArgumentException expected) {
+            // Required before Mojang is contacted.
+        }
         expect("127.0.0.1:10809", InetSocketAddress.createUnresolved("127.0.0.1", 10809));
         expect("http://127.0.0.1:7890/", InetSocketAddress.createUnresolved("127.0.0.1", 7890));
         expect(" http://user@proxy.local:3128 ", InetSocketAddress.createUnresolved("proxy.local", 3128));

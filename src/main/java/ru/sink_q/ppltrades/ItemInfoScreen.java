@@ -21,6 +21,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -36,14 +37,23 @@ public final class ItemInfoScreen extends Screen {
     private static final int C_ACCENT = 0xFF2DD4BF;
     private static final int C_PANEL = 0xC0101012;
     private static final int C_BORDER = 0xFF2A2A2E;
+    // The API's largest history window (month) contains at most 31 daily samples.
+    private static final int MAX_HISTORY_POINTS = 32;
+    private static final int MAX_LISTINGS = 500;
+    private static final int MAX_CHART_LINE_STEPS = 4096;
+    // The server parser accepts amounts up to 100,000 and at most nine diamond blocks.
+    private static final double MAX_PRICE = 900_000.0;
+    private static final int INVALID_COORDINATE = Integer.MIN_VALUE;
 
     private enum Range {
-        DAY("day"), WEEK("week"), MONTH("month");
+        DAY("day", 86_400), WEEK("week", 604_800), MONTH("month", 2_592_000);
 
         final String api;
+        final long spanSeconds;
 
-        Range(String api) {
+        Range(String api, long spanSeconds) {
             this.api = api;
+            this.spanSeconds = spanSeconds;
         }
     }
 
@@ -161,13 +171,48 @@ public final class ItemInfoScreen extends Screen {
                 historyFailed = true;
                 return;
             }
-            List<Point> points = new ArrayList<>();
-            for (JsonElement el : json.getAsJsonArray("points")) {
-                JsonObject p = el.getAsJsonObject();
-                points.add(new Point(p.get("t").getAsLong(), p.get("median").getAsDouble(),
-                        p.get("min").getAsDouble(), p.get("avg").getAsDouble()));
+            JsonElement pointsElement = json.get("points");
+            if (pointsElement == null || !pointsElement.isJsonArray()) {
+                historyFailed = true;
+                return;
             }
-            history = points;
+            JsonArray pointsJson = pointsElement.getAsJsonArray();
+            if (pointsJson.size() > MAX_HISTORY_POINTS) {
+                historyFailed = true;
+                return;
+            }
+            long now = System.currentTimeMillis() / 1000;
+            long oldestAllowed = now - requested.spanSeconds - 86_400;
+            long newestAllowed = now + 86_400;
+            List<Point> points = new ArrayList<>(pointsJson.size());
+            for (JsonElement el : pointsJson) {
+                try {
+                    if (el == null || !el.isJsonObject()) {
+                        continue;
+                    }
+                    JsonObject p = el.getAsJsonObject();
+                    long t = integer(p, "t", oldestAllowed, newestAllowed);
+                    double median = price(p, "median");
+                    double min = price(p, "min");
+                    double avg = price(p, "avg");
+                    if (min > median || min > avg) {
+                        continue;
+                    }
+                    points.add(new Point(t, median, min, avg));
+                } catch (RuntimeException ignored) {
+                    // Ignore an invalid sample while retaining valid samples from the response.
+                }
+            }
+            points.sort(Comparator.comparingLong(Point::t));
+            List<Point> ordered = new ArrayList<>(points.size());
+            long previousTime = Long.MIN_VALUE;
+            for (Point point : points) {
+                if (point.t() > previousTime) {
+                    ordered.add(point);
+                    previousTime = point.t();
+                }
+            }
+            history = ordered;
         });
     }
 
@@ -181,30 +226,67 @@ public final class ItemInfoScreen extends Screen {
                 listingsFailed = true;
                 return;
             }
-            List<Listing> out = new ArrayList<>();
-            for (JsonElement el : json.getAsJsonArray("listings")) {
-                JsonObject l = el.getAsJsonObject();
-                List<String> lines = new ArrayList<>();
-                JsonArray signs = l.getAsJsonArray("signs");
-                if (signs != null && !signs.isEmpty()) {
-                    for (JsonElement line : signs.get(0).getAsJsonArray()) {
-                        String s = line.getAsString().strip();
-                        if (!s.isEmpty()) {
-                            lines.add(s);
+            JsonElement listingsElement = json.get("listings");
+            if (listingsElement == null || !listingsElement.isJsonArray()) {
+                listingsFailed = true;
+                return;
+            }
+            JsonArray listingsJson = listingsElement.getAsJsonArray();
+            List<Listing> out = new ArrayList<>(Math.min(listingsJson.size(), MAX_LISTINGS));
+            long now = System.currentTimeMillis() / 1000;
+            for (int i = 0; i < Math.min(listingsJson.size(), MAX_LISTINGS); i++) {
+                try {
+                    JsonElement el = listingsJson.get(i);
+                    if (el == null || !el.isJsonObject()) {
+                        continue;
+                    }
+                    JsonObject l = el.getAsJsonObject();
+                    int x = (int) integer(l, "x", -30_000_000, 30_000_000);
+                    int y = (int) integer(l, "y", -2048, 2048);
+                    int z = (int) integer(l, "z", -30_000_000, 30_000_000);
+                    double price = price(l, "price");
+                    int count = (int) integer(l, "count", 1, 100_000);
+                    int maxStack = (int) integer(l, "maxStack", 1, 99);
+                    long lastSeen = integer(l, "lastSeen", Math.max(1, now - 8 * 86_400), now + 86_400);
+                    List<String> lines = new ArrayList<>();
+                    JsonElement signsElement = l.get("signs");
+                    if (signsElement != null && !signsElement.isJsonNull()) {
+                        if (!signsElement.isJsonArray()) {
+                            continue;
+                        }
+                        JsonArray signs = signsElement.getAsJsonArray();
+                        if (!signs.isEmpty()) {
+                            JsonElement firstSign = signs.get(0);
+                            if (!firstSign.isJsonArray()) {
+                                continue;
+                            }
+                            JsonArray signLines = firstSign.getAsJsonArray();
+                            for (int j = 0; j < Math.min(signLines.size(), 4); j++) {
+                                JsonElement line = signLines.get(j);
+                                if (!line.isJsonPrimitive() || !line.getAsJsonPrimitive().isString()) {
+                                    continue;
+                                }
+                                String raw = line.getAsString();
+                                String s = raw.substring(0, Math.min(90, raw.length())).strip();
+                                if (!s.isEmpty()) {
+                                    lines.add(s);
+                                }
+                            }
                         }
                     }
-                }
-                // продавец — последняя строка, похожая на ник; в тексте таблички её не повторяем
-                String seller = "";
-                for (int i = lines.size() - 1; i >= 0; i--) {
-                    if (NICK.matcher(lines.get(i)).matches()) {
-                        seller = lines.remove(i);
-                        break;
+                    // продавец — последняя строка, похожая на ник; в тексте таблички её не повторяем
+                    String seller = "";
+                    for (int j = lines.size() - 1; j >= 0; j--) {
+                        if (NICK.matcher(lines.get(j)).matches()) {
+                            seller = lines.remove(j);
+                            break;
+                        }
                     }
+                    out.add(new Listing(new net.minecraft.core.BlockPos(x, y, z), price, count, maxStack,
+                            String.join(" / ", lines), seller, lastSeen));
+                } catch (RuntimeException ignored) {
+                    // Skip malformed or out-of-range entries without failing the whole listing response.
                 }
-                out.add(new Listing(new net.minecraft.core.BlockPos(l.get("x").getAsInt(), l.get("y").getAsInt(),
-                        l.get("z").getAsInt()), l.get("price").getAsDouble(), l.get("count").getAsInt(),
-                        l.get("maxStack").getAsInt(), String.join(" / ", lines), seller, l.get("lastSeen").getAsLong()));
             }
             listings = out;
         });
@@ -317,14 +399,17 @@ public final class ItemInfoScreen extends Screen {
         int prevMx = -1, prevMy = 0, prevLx = -1, prevLy = 0;
         Point hover = null;
         for (Point p : history) {
-            int x = px + (int) Math.round((double) (p.t() - t0) / (t1 - t0) * pw);
-            int my = py + ph - (int) Math.round((p.median() * unit - lo) / (hi - lo) * ph);
-            int ly = py + ph - (int) Math.round((p.min() * unit - lo) / (hi - lo) * ph);
+            int x = chartCoordinate(px + (double) (p.t() - t0) / (t1 - t0) * pw, px, px + pw);
+            int my = chartCoordinate(py + ph - (p.median() * unit - lo) / (hi - lo) * ph, py, py + ph);
+            int ly = chartCoordinate(py + ph - (p.min() * unit - lo) / (hi - lo) * ph, py, py + ph);
+            if (x == INVALID_COORDINATE || my == INVALID_COORDINATE || ly == INVALID_COORDINATE) {
+                continue;
+            }
             if (prevLx >= 0) {
-                line(g, prevLx, prevLy, x, ly, 0xFF555555);
+                line(g, prevLx, prevLy, x, ly, 0xFF555555, px, px + pw, py, py + ph);
             }
             if (prevMx >= 0) {
-                line(g, prevMx, prevMy, x, my, C_ACCENT);
+                line(g, prevMx, prevMy, x, my, C_ACCENT, px, px + pw, py, py + ph);
             }
             g.fill(x - 1, my - 1, x + 2, my + 2, C_ACCENT);
             prevMx = x;
@@ -477,13 +562,56 @@ public final class ItemInfoScreen extends Screen {
     }
 
     /** Линия из квадратиков 1x1 (в GUI нет примитива линии под углом). */
-    private static void line(GuiGraphicsExtractor g, int x1, int y1, int x2, int y2, int color) {
-        int steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
+    private static void line(GuiGraphicsExtractor g, int x1, int y1, int x2, int y2, int color,
+                             int minX, int maxX, int minY, int maxY) {
+        if (x1 < minX || x1 > maxX || x2 < minX || x2 > maxX
+                || y1 < minY || y1 > maxY || y2 < minY || y2 > maxY) {
+            return;
+        }
+        long dx = (long) x2 - x1;
+        long dy = (long) y2 - y1;
+        long rawSteps = Math.max(Math.abs(dx), Math.abs(dy));
+        if (rawSteps > MAX_CHART_LINE_STEPS) {
+            return;
+        }
+        int steps = (int) rawSteps;
         for (int s = 0; s <= steps; s++) {
-            int x = x1 + (steps == 0 ? 0 : (x2 - x1) * s / steps);
-            int y = y1 + (steps == 0 ? 0 : (y2 - y1) * s / steps);
+            int x = x1 + (steps == 0 ? 0 : (int) (dx * s / steps));
+            int y = y1 + (steps == 0 ? 0 : (int) (dy * s / steps));
             g.fill(x, y, x + 1, y + 1, color);
         }
+    }
+
+    private static int chartCoordinate(double value, int min, int max) {
+        if (!Double.isFinite(value) || min > max) {
+            return INVALID_COORDINATE;
+        }
+        double clipped = Math.max(min, Math.min(max, value));
+        return (int) Math.round(clipped);
+    }
+
+    private static double price(JsonObject object, String name) {
+        JsonElement element = object.get(name);
+        if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+            throw new IllegalArgumentException("Missing or nonnumeric price");
+        }
+        double value = element.getAsDouble();
+        if (!Double.isFinite(value) || value <= 0 || value > MAX_PRICE) {
+            throw new IllegalArgumentException("Price outside accepted range");
+        }
+        return value;
+    }
+
+    private static long integer(JsonObject object, String name, long min, long max) {
+        JsonElement element = object.get(name);
+        if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+            throw new IllegalArgumentException("Missing or nonnumeric integer");
+        }
+        double value = element.getAsDouble();
+        if (!Double.isFinite(value) || value < min || value > max || value != Math.rint(value)) {
+            throw new IllegalArgumentException("Integer outside accepted range");
+        }
+        return (long) value;
     }
 
     private static Component ago(long seconds) {

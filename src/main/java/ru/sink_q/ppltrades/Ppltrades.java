@@ -80,7 +80,7 @@ public class Ppltrades implements ClientModInitializer {
             LOGGER.info("Мир PepeLand: {} ({})", world,
                     PriceApi.isTradingWorld(world) ? "сбор цен включён" : "не торговый, бочки не читаются");
         }
-        if (PpltradesConfig.get().collectPrices) {
+        if (isCollectingActive()) {
             BarrelCollector.tick(mc);
             if ((ticks % REPORTS_FLUSH_TICKS == 0 && PriceApi.hasQueued()) || PriceApi.hasFullBatch()) {
                 PriceApi.flush(PepeLand.currentAddress());

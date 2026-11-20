@@ -108,7 +108,7 @@ final class PpltradesConfigScreen {
                 .setErrorSupplier(rows -> rows.stream().allMatch(PpltradesConfigScreen::validUrl)
                         ? Optional.empty() : Optional.of(text("api_url.invalid")))
                 .setSaveConsumer(values -> config.mirrorUrls = values.stream()
-                        .map(String::trim).filter(v -> !v.isEmpty()).toList())
+                        .map(String::trim).filter(PpltradesConfig::isSecureApiUrl).toList())
                 .build());
         prices.addEntry(toggle(entries, "notify_unreachable", config.notifyUnreachable, true,
                 v -> config.notifyUnreachable = v));
@@ -162,17 +162,7 @@ final class PpltradesConfigScreen {
     }
 
     static boolean validUrl(String value) {
-        if (value.isBlank()) {
-            return true;
-        }
-        try {
-            URI url = URI.create(value.trim());
-            return ("https".equalsIgnoreCase(url.getScheme()) || "http".equalsIgnoreCase(url.getScheme()))
-                    && url.getHost() != null && url.getPort() != 0 && url.getPort() <= 65535
-                    && url.getUserInfo() == null && url.getQuery() == null && url.getFragment() == null;
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
+        return value != null && (value.isBlank() || PpltradesConfig.isSecureApiUrl(value));
     }
 
     static List<String> aliasRows(Map<String, List<String>> aliases) {

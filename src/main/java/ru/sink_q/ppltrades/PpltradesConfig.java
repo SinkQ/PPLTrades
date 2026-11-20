@@ -6,6 +6,7 @@ import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.Reader;
 import java.io.Writer;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,7 +20,6 @@ public final class PpltradesConfig {
     private static final String LEGACY_API_URL = "https://ppltrades.mooo.com";
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
-    private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve(Ppltrades.MOD_ID + ".json");
 
     private static PpltradesConfig instance = new PpltradesConfig();
     // Токен и очередь цен используют один адрес сервиса в течение всего запуска клиента.
@@ -91,9 +91,10 @@ public final class PpltradesConfig {
     }
 
     public static void load() {
+        Path path = configPath();
         try {
-            if (Files.exists(PATH)) {
-                try (Reader reader = Files.newBufferedReader(PATH, StandardCharsets.UTF_8)) {
+            if (Files.exists(path)) {
+                try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
                     PpltradesConfig loaded = GSON.fromJson(reader, PpltradesConfig.class);
                     if (loaded != null) {
                         instance = loaded;
@@ -101,7 +102,7 @@ public final class PpltradesConfig {
                 }
             }
         } catch (Exception e) {
-            Ppltrades.LOGGER.error("Не удалось прочитать {}, используются значения по умолчанию", PATH, e);
+            Ppltrades.LOGGER.error("Не удалось прочитать {}, используются значения по умолчанию", path, e);
         }
         // Переносим только прежний адрес по умолчанию и заглушки из ранних версий.
         String url = instance.apiUrl == null ? DEFAULT_API_URL : normalizeApiUrl(instance.apiUrl);
@@ -112,7 +113,10 @@ public final class PpltradesConfig {
                 || url.contains("ppltrades.mooo.com")) { // старый адрес до переезда на Cloudflare Pages
             instance.apiUrl = DEFAULT_API_URL;
         } else {
-            instance.apiUrl = url;
+            // Keep invalid input unchanged so it remains available for repair in the config screen.
+            if (url.isBlank() || isSecureApiUrl(url)) {
+                instance.apiUrl = url;
+            }
         }
         if (instance.signSearchAliases == null) {
             instance.signSearchAliases = Map.of();
@@ -139,23 +143,51 @@ public final class PpltradesConfig {
         if (instance.searchOverlay == null) {
             instance.searchOverlay = SearchOverlay.ITEM_NAME;
         }
-        activeApiUrl = instance.apiUrl;
+        activeApiUrl = isSecureApiUrl(instance.apiUrl) ? normalizeApiUrl(instance.apiUrl) : "";
         save();
+    }
+
+    /** Returns whether a nonblank API base URL is a valid HTTPS URL. */
+    public static boolean isSecureApiUrl(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            URI url = URI.create(value.trim());
+            String authority = url.getRawAuthority();
+            int port = url.getPort();
+            return url.isAbsolute() && !url.isOpaque()
+                    && "https".equalsIgnoreCase(url.getScheme())
+                    && url.getHost() != null
+                    && !url.getHost().isBlank()
+                    && (port == -1 || (port > 0 && port <= 65535))
+                    && authority != null && !authority.endsWith(":")
+                    && url.getUserInfo() == null && url.getQuery() == null && url.getFragment() == null;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     public static String normalizeApiUrl(String value) {
         return value.trim().replaceAll("/+$", "");
     }
 
+    private static Path configPath() {
+        return FabricLoader.getInstance().getConfigDir().resolve(Ppltrades.MOD_ID + ".json");
+    }
+
     public static void save() {
-        instance.apiUrl = normalizeApiUrl(instance.apiUrl);
+        if (instance.apiUrl != null && (instance.apiUrl.isBlank() || isSecureApiUrl(instance.apiUrl))) {
+            instance.apiUrl = normalizeApiUrl(instance.apiUrl);
+        }
+        Path path = configPath();
         try {
-            Files.createDirectories(PATH.getParent());
-            try (Writer writer = Files.newBufferedWriter(PATH, StandardCharsets.UTF_8)) {
+            Files.createDirectories(path.getParent());
+            try (Writer writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
                 GSON.toJson(instance, writer);
             }
         } catch (Exception e) {
-            Ppltrades.LOGGER.error("Не удалось сохранить {}", PATH, e);
+            Ppltrades.LOGGER.error("Не удалось сохранить {}", path, e);
         }
     }
 }

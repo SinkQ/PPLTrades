@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
 
 import java.util.Locale;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
 
 public final class PepeLand {
     private PepeLand() {
@@ -23,10 +24,17 @@ public final class PepeLand {
         return Long.toHexString(seed);
     }
 
-    /** true, если игрок сейчас подключён к серверу, в адресе которого есть "pepeland". */
+    /** Принимаем только хосты в официальной зоне PepeLand, а не произвольные похожие адреса. */
     public static boolean isConnected() {
         String address = currentAddress();
-        return address != null && address.contains("pepeland");
+        if (address == null || !ServerAddress.isValidAddress(address)) {
+            return false;
+        }
+        String host = ServerAddress.parseString(address).getHost().toLowerCase(Locale.ROOT);
+        if (host.endsWith(".")) {
+            host = host.substring(0, host.length() - 1);
+        }
+        return host.equals("pepeland.net") || host.endsWith(".pepeland.net");
     }
 
     /** Адрес текущего сервера в нижнем регистре или null (одиночная игра / меню). */

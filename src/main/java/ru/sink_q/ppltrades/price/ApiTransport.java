@@ -36,6 +36,9 @@ import java.util.function.Function;
 final class ApiTransport {
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(8);
     private static final long PROXY_REDETECT_MS = 60_000;
+    private static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+    record Response(String base, HttpResponse<String> http) {}
 
     /** Маршрут: null = напрямую, иначе адрес HTTP-прокси. */
     private record Route(InetSocketAddress proxy) {
@@ -56,13 +59,17 @@ final class ApiTransport {
     /** Основной адрес, затем зеркала (без повторов). */
     static List<String> baseUrls() {
         List<String> urls = new ArrayList<>();
-        urls.add(PpltradesConfig.activeApiUrl());
+        String primary = PpltradesConfig.activeApiUrl();
+        if (!PpltradesConfig.isSecureApiUrl(primary)) {
+            return List.of();
+        }
+        urls.add(primary);
         List<String> mirrors = PpltradesConfig.get().mirrorUrls;
         if (mirrors != null) {
             for (String m : mirrors) {
                 if (m != null && !m.isBlank()) {
                     String url = PpltradesConfig.normalizeApiUrl(m);
-                    if (!urls.contains(url)) {
+                    if (PpltradesConfig.isSecureApiUrl(url) && !urls.contains(url)) {
                         urls.add(url);
                     }
                 }
@@ -75,9 +82,12 @@ final class ApiTransport {
      * Отправить запрос, перебирая адреса и маршруты до первого ответа сервера (любой HTTP-статус).
      * @throws IOException если ни один вариант не ответил
      */
-    static HttpResponse<String> send(Function<String, HttpRequest> request) throws IOException, InterruptedException {
+    static Response send(String pinnedBase, Function<String, HttpRequest> request) throws IOException, InterruptedException {
         List<Map.Entry<String, Route>> attempts = new ArrayList<>();
         for (String base : baseUrls()) {
+            if (pinnedBase != null && !pinnedBase.equals(base)) {
+                continue;
+            }
             for (Route route : routes()) {
                 attempts.add(Map.entry(base, route));
             }
@@ -91,13 +101,17 @@ final class ApiTransport {
             Route route = attempt.getValue();
             try {
                 HttpResponse<String> response = client(route).send(request.apply(base),
-                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                        HttpResponse.BodyHandlers.limiting(HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8),
+                                MAX_RESPONSE_BYTES));
+                if (response.statusCode() >= 300 && response.statusCode() < 400) {
+                    throw new IOException("Перенаправление сервиса цен не разрешено");
+                }
                 if (!base.equals(lastBase) || !route.equals(lastRoute)) {
                     Ppltrades.LOGGER.info("Сервер цен доступен: {} ({})", base, route.label());
                 }
                 lastBase = base;
                 lastRoute = route;
-                return response;
+                return new Response(base, response);
             } catch (IOException e) {
                 last = e;
                 errors.add(base + " " + route.label() + ": " + e);
@@ -133,7 +147,7 @@ final class ApiTransport {
         return CLIENTS.computeIfAbsent(route, r -> {
             HttpClient.Builder b = HttpClient.newBuilder()
                     .connectTimeout(CONNECT_TIMEOUT)
-                    .followRedirects(HttpClient.Redirect.NORMAL);
+                    .followRedirects(HttpClient.Redirect.NEVER);
             b.proxy(r.proxy() == null ? HttpClient.Builder.NO_PROXY : ProxySelector.of(r.proxy()));
             return b.build();
         });
