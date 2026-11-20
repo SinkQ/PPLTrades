@@ -30,6 +30,10 @@ dependencies {
 
     // Опциональная интеграция: нужна только для компиляции, в мод не встраивается
     compileOnly "maven.modrinth:jei:${project.jei_version}"
+    compileOnly "maven.modrinth:modmenu:${project.modmenu_version}"
+    compileOnly "maven.modrinth:cloth-config:${project.cloth_config_version}"
+    runtimeOnly "maven.modrinth:modmenu:${project.modmenu_version}"
+    runtimeOnly "maven.modrinth:cloth-config:${project.cloth_config_version}"
 }
 
 processResources {
@@ -65,6 +69,18 @@ tasks.register('testSignSearchMasks', JavaExec) {
     mainClass = 'ru.sink_q.ppltrades.SignSearchMaskTest'
 }
 
+tasks.register('testConfigScreenValues', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ru.sink_q.ppltrades.compat.modmenu.ConfigScreenValuesTest'
+}
+
+tasks.register('testApiTransport', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ru.sink_q.ppltrades.price.ApiTransportTest'
+}
+
 tasks.register('signSearchCoverage', JavaExec) {
     group = 'verification'
     description = 'Audits local/test-only sign search coverage against a JSONL export.'
@@ -86,13 +102,14 @@ tasks.register('signSearchCoverage', JavaExec) {
 }
 
 tasks.named('test') {
-    // Проверки масок запускаются обычным Java main, без зависимости от JUnit.
+    // Проверки запускаются обычными Java main, без зависимости от JUnit.
     failOnNoDiscoveredTests = false
-    dependsOn 'testSignSearchMasks'
+    dependsOn 'testSignSearchMasks', 'testConfigScreenValues', 'testApiTransport'
 }
 
 jar {
     from("LICENSE.txt") {
         rename { "${it}_${project.archives_base_name}" }
     }
+    from("THIRD_PARTY_NOTICES.txt") // MIT notice for code adapted from Pochatok
 }

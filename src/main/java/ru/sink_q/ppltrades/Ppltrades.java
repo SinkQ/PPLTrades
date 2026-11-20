@@ -25,18 +25,24 @@ public class Ppltrades implements ClientModInitializer {
     private static final int REPORTS_FLUSH_TICKS = 15 * 20;
 
     private static int ticks;
+    private static String lastWorld;
 
     @Override
     public void onInitializeClient() {
         PpltradesConfig.load();
         TradeCategories.load();
         SignSearch.register();
+        BarrelHighlight.register();
 
         ItemTooltipCallback.EVENT.register((stack, context, flag, lines) -> TooltipHandler.append(stack, lines));
 
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
             // Все экраны: инвентари/сундуки, а также окно рецептов JEI.
             ScreenKeyboardEvents.afterKeyPress(screen).register(SignSearch::onScreenKeyPress);
+            // открыли подсвеченную бочку — подсветка больше не нужна (в любом мире)
+            if (screen instanceof net.minecraft.client.gui.screens.inventory.ContainerScreen && client.level != null) {
+                BarrelHighlight.onBarrelOpened(BarrelCollector.findTargetBarrel(client));
+            }
             if (isCollectingActive()) {
                 BarrelCollector.onScreenOpened(client, screen);
             }
@@ -44,8 +50,9 @@ public class Ppltrades implements ClientModInitializer {
 
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             ticks = 0;
+            refreshVisiblePrices();
             if (isPriceTrackingActive()) {
-                PriceApi.refreshPrices();
+                PriceApi.refreshConfig();
             }
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
@@ -62,24 +69,39 @@ public class Ppltrades implements ClientModInitializer {
         if (!isPriceTrackingActive()) {
             return;
         }
-        BarrelCollector.tick(mc);
-
         ticks++;
-        if (ticks % PRICES_REFRESH_TICKS == 0 && PpltradesConfig.get().showPrices) {
-            PriceApi.refreshPrices();
+        if (ticks % PRICES_REFRESH_TICKS == 0 || PriceApi.retryDue()) {
+            refreshVisiblePrices();
+            PriceApi.refreshConfig();
         }
-        if ((ticks % REPORTS_FLUSH_TICKS == 0 && PriceApi.hasQueued()) || PriceApi.hasFullBatch()) {
-            PriceApi.flush(PepeLand.currentAddress());
+        String world = PepeLand.worldId();
+        if (world != null && !world.equals(lastWorld)) { // переход между мирами PepeLand
+            lastWorld = world;
+            LOGGER.info("Мир PepeLand: {} ({})", world,
+                    PriceApi.isTradingWorld(world) ? "сбор цен включён" : "не торговый, бочки не читаются");
+        }
+        if (PpltradesConfig.get().collectPrices) {
+            BarrelCollector.tick(mc);
+            if ((ticks % REPORTS_FLUSH_TICKS == 0 && PriceApi.hasQueued()) || PriceApi.hasFullBatch()) {
+                PriceApi.flush(PepeLand.currentAddress());
+            }
+        }
+    }
+
+    public static void refreshVisiblePrices() {
+        if (PpltradesConfig.get().showPrices && isPriceTrackingActive()) {
+            PriceApi.refreshPrices();
         }
     }
 
     /** Цены собираются и показываются только на серверах PepeLand и при заданном адресе бэкенда. */
     private static boolean isPriceTrackingActive() {
-        String api = PpltradesConfig.get().apiUrl;
-        return api != null && !api.isEmpty() && PepeLand.isConnected();
+        return !PpltradesConfig.activeApiUrl().isEmpty() && PepeLand.isConnected();
     }
 
+    /** Бочки читаются только в торговом мире (список миров сервер отдаёт в /v1/config). */
     private static boolean isCollectingActive() {
-        return isPriceTrackingActive() && PpltradesConfig.get().collectPrices;
+        return isPriceTrackingActive() && PpltradesConfig.get().collectPrices
+                && PriceApi.isTradingWorld(PepeLand.worldId());
     }
 }

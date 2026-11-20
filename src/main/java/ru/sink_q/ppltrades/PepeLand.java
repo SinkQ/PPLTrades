@@ -9,6 +9,20 @@ public final class PepeLand {
     private PepeLand() {
     }
 
+    /**
+     * Идентификатор текущего мира: хэш сида, который сервер присылает при входе/смене мира (hex).
+     * Все миры PepeLand — "minecraft:overworld", различаются они только этим числом. null вне мира.
+     */
+    public static String worldId() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null) {
+            return null;
+        }
+        long seed = ((ru.sink_q.ppltrades.mixin.BiomeManagerAccessor) mc.level.getBiomeManager())
+                .ppltrades$getBiomeZoomSeed();
+        return Long.toHexString(seed);
+    }
+
     /** true, если игрок сейчас подключён к серверу, в адресе которого есть "pepeland". */
     public static boolean isConnected() {
         String address = currentAddress();

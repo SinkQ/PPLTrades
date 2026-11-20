@@ -93,7 +93,7 @@ public final class BarrelCollector {
     }
 
     /** Бочка под прицелом. Если прицел на табличке, висящей на бочке, берём бочку за ней. */
-    private static BlockPos findTargetBarrel(Minecraft mc) {
+    public static BlockPos findTargetBarrel(Minecraft mc) {
         HitResult hit = mc.hitResult;
         if (!(hit instanceof BlockHitResult blockHit) || hit.getType() != HitResult.Type.BLOCK) {
             return null;
@@ -112,6 +112,7 @@ public final class BarrelCollector {
         // и разные зелья не смешивались. Алмазы и алмазные блоки — оплата покупателей, а не товар.
         Map<String, Integer> counts = new LinkedHashMap<>();
         Map<String, ItemStack> samples = new LinkedHashMap<>();
+        Map<String, List<Integer>> slotCounts = new LinkedHashMap<>();
         for (int i = 0; i < container.getContainerSize(); i++) {
             ItemStack stack = container.getItem(i);
             if (stack.isEmpty() || CURRENCY.contains(stack.getItem())) {
@@ -123,6 +124,7 @@ public final class BarrelCollector {
             }
             counts.merge(key, stack.getCount(), Integer::sum);
             samples.putIfAbsent(key, stack);
+            slotCounts.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(stack.getCount());
         }
         if (counts.isEmpty()) {
             return null;
@@ -137,6 +139,10 @@ public final class BarrelCollector {
 
         JsonObject report = new JsonObject();
         report.addProperty("dimension", level.dimension().identifier().toString());
+        String world = ru.sink_q.ppltrades.PepeLand.worldId();
+        if (world != null) {
+            report.addProperty("world", world);
+        }
         report.addProperty("x", barrel.getX());
         report.addProperty("y", barrel.getY());
         report.addProperty("z", barrel.getZ());
@@ -166,10 +172,31 @@ public final class BarrelCollector {
                     }
                     c.addProperty("count", e.getValue());
                     c.addProperty("maxStack", s.getMaxStackSize());
+                    Integer slot = uniformSlotSize(slotCounts.get(e.getKey()));
+                    if (slot != null) {
+                        c.addProperty("slotSize", slot);
+                    }
                     candidates.add(c);
                 });
         report.add("candidates", candidates);
         return report;
+    }
+
+    /**
+     * Сколько предметов продавец кладёт в одну ячейку, если ячейки заполнены одинаково
+     * (например, везде по 8 блоков): тогда «слот» на табличке значит именно это количество.
+     * Берём самое частое количество, если им заполнено не меньше 2/3 ячеек и оно наибольшее
+     * (неполные остатки после покупок не мешают). Иначе null — «слот» будет считаться полным стаком.
+     */
+    static Integer uniformSlotSize(List<Integer> counts) {
+        if (counts == null || counts.size() < 2) {
+            return null;
+        }
+        Map<Integer, Integer> freq = new java.util.HashMap<>();
+        counts.forEach(c -> freq.merge(c, 1, Integer::sum));
+        Map.Entry<Integer, Integer> mode = freq.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow();
+        int max = counts.stream().max(Integer::compare).orElseThrow();
+        return mode.getKey() == max && mode.getValue() * 3 >= counts.size() * 2 ? mode.getKey() : null;
     }
 
     /** Тексты настенных табличек, прикреплённых к бочке. */

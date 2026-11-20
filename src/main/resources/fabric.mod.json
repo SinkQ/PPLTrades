@@ -3,10 +3,15 @@
   "id": "ppltrades",
   "version": "${version}",
   "name": "PPLTrades",
-  "description": "PepeLand trading helper: trading zone category and crowd-sourced shop prices in item tooltips (hold Shift), sign search for the hovered item with Pochatok (N key).",
-  "authors": [],
-  "contact": {},
+  "description": "Unofficial PepeLand trading helper (not affiliated with PepeLand): trading zone categories and crowd-sourced shop prices in item tooltips, an item info window (I key) and sign search with Pochatok (N key). Sends barrel prices you open in the trading zone to the stats server; can be turned off in the settings.",
+  "authors": ["Sink_Q"],
+  "contact": {
+    "homepage": "https://ppltrades.pages.dev",
+    "sources": "https://github.com/SinkQ/PPLTrades",
+    "issues": "https://github.com/SinkQ/PPLTrades/issues"
+  },
   "license": "MIT",
+  "icon": "assets/ppltrades/logo.png",
   "environment": "client",
   "entrypoints": {
     "client": [
@@ -14,6 +19,9 @@
     ],
     "jei_mod_plugin": [
       "ru.sink_q.ppltrades.compat.jei.PpltradesJeiPlugin"
+    ],
+    "modmenu": [
+      "ru.sink_q.ppltrades.compat.modmenu.PpltradesModMenu"
     ]
   },
   "mixins": [
@@ -26,6 +34,8 @@
   },
   "suggests": {
     "pochatok": "*",
-    "jei": "*"
+    "jei": "*",
+    "modmenu": "*",
+    "cloth-config": "*"
   }
 }

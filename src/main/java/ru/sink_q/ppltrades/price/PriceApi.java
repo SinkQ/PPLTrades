@@ -22,8 +22,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -44,9 +46,6 @@ public final class PriceApi {
     /** Неотправленные наблюдения сохраняются при выходе и отправляются при следующем запуске. */
     private static final Path QUEUE_FILE = FabricLoader.getInstance().getConfigDir().resolve("ppltrades-queue.json");
 
-    private static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "PPLTrades-Network");
         t.setDaemon(true);
@@ -63,6 +62,7 @@ public final class PriceApi {
     private static String token;
     private static long tokenExpiresAtMs;
     private static long authBlockedUntilMs;
+    private static boolean unreachableNotified;
 
     private PriceApi() {
     }
@@ -133,7 +133,7 @@ public final class PriceApi {
         }
         EXECUTOR.execute(() -> {
             try {
-                while (!QUEUE.isEmpty()) {
+                while (PpltradesConfig.get().collectPrices && !QUEUE.isEmpty()) {
                     List<JsonObject> batch = new ArrayList<>();
                     JsonObject item;
                     while (batch.size() < MAX_BATCH && (item = QUEUE.poll()) != null) {
@@ -151,6 +151,60 @@ public final class PriceApi {
         });
     }
 
+    /** Миры, в которых собираются цены (с сервера). Пусто = сервер не ограничивает, собираем везде. */
+    private static volatile Set<String> tradingWorlds = Set.of();
+    private static final AtomicBoolean CONFIG_FETCHING = new AtomicBoolean();
+
+    /** Можно ли собирать бочки в этом мире. Неизвестный мир (null) — нет, если список задан. */
+    public static boolean isTradingWorld(String worldId) {
+        Set<String> worlds = tradingWorlds;
+        return worlds.isEmpty() || (worldId != null && worlds.contains(worldId));
+    }
+
+    /**
+     * GET запрос к серверу цен (например "/v1/history?key=..."), ответ разбирается в сетевом потоке,
+     * колбэк вызывается в игровом потоке; при ошибке — с null.
+     */
+    public static void fetchJson(String pathAndQuery, java.util.function.Consumer<JsonObject> onDone) {
+        EXECUTOR.execute(() -> {
+            JsonObject result = null;
+            try {
+                HttpResponse<String> response = get(pathAndQuery);
+                if (response.statusCode() == 200) {
+                    result = JsonParser.parseString(response.body()).getAsJsonObject();
+                }
+            } catch (Exception e) {
+                Ppltrades.LOGGER.warn("Не удалось загрузить {}: {}", pathAndQuery, e.toString());
+            }
+            JsonObject done = result;
+            Minecraft.getInstance().execute(() -> onDone.accept(done));
+        });
+    }
+
+    /** Загрузить настройки сбора с сервера (список торговых миров), асинхронно. */
+    public static void refreshConfig() {
+        if (!CONFIG_FETCHING.compareAndSet(false, true)) {
+            return;
+        }
+        EXECUTOR.execute(() -> {
+            try {
+                HttpResponse<String> response = get("/v1/config");
+                if (response.statusCode() == 200) {
+                    Set<String> worlds = new HashSet<>();
+                    JsonElement list = JsonParser.parseString(response.body()).getAsJsonObject().get("tradingWorlds");
+                    if (list != null && list.isJsonArray()) {
+                        list.getAsJsonArray().forEach(w -> worlds.add(w.getAsString().toLowerCase(java.util.Locale.ROOT)));
+                    }
+                    tradingWorlds = Set.copyOf(worlds);
+                }
+            } catch (Exception e) {
+                Ppltrades.LOGGER.warn("Не удалось загрузить настройки сервера цен: {}", e.toString());
+            } finally {
+                CONFIG_FETCHING.set(false);
+            }
+        });
+    }
+
     /** Загрузить актуальную статистику цен (асинхронно). */
     public static void refreshPrices() {
         if (!FETCHING.compareAndSet(false, true)) {
@@ -158,8 +212,7 @@ public final class PriceApi {
         }
         EXECUTOR.execute(() -> {
             try {
-                HttpResponse<String> response = HTTP.send(request("/v1/prices").GET().build(),
-                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+                HttpResponse<String> response = get("/v1/prices");
                 if (response.statusCode() != 200) {
                     Ppltrades.LOGGER.warn("Сервер цен ответил {}", response.statusCode());
                     return;
@@ -270,8 +323,7 @@ public final class PriceApi {
         }
 
         try {
-            HttpResponse<String> challenge = HTTP.send(request("/v1/auth/challenge").GET().build(),
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> challenge = get("/v1/auth/challenge");
             if (challenge.statusCode() != 200) {
                 throw new IllegalStateException("challenge: HTTP " + challenge.statusCode());
             }
@@ -309,7 +361,7 @@ public final class PriceApi {
             }
             JsonObject saved = JsonParser.parseString(Files.readString(TOKEN_FILE, StandardCharsets.UTF_8)).getAsJsonObject();
             if (saved.get("uuid").getAsString().equals(Minecraft.getInstance().getUser().getProfileId().toString())
-                    && saved.get("apiUrl").getAsString().equals(PpltradesConfig.get().apiUrl)) {
+                    && saved.get("apiUrl").getAsString().equals(PpltradesConfig.activeApiUrl())) {
                 token = saved.get("token").getAsString();
                 tokenExpiresAtMs = saved.get("expiresAtMs").getAsLong();
             }
@@ -322,7 +374,7 @@ public final class PriceApi {
         try {
             JsonObject saved = new JsonObject();
             saved.addProperty("uuid", Minecraft.getInstance().getUser().getProfileId().toString());
-            saved.addProperty("apiUrl", PpltradesConfig.get().apiUrl);
+            saved.addProperty("apiUrl", PpltradesConfig.activeApiUrl());
             saved.addProperty("token", token);
             saved.addProperty("expiresAtMs", tokenExpiresAtMs);
             Files.writeString(TOKEN_FILE, GSON.toJson(saved), StandardCharsets.UTF_8);
@@ -340,17 +392,74 @@ public final class PriceApi {
     }
 
     private static HttpResponse<String> post(String path, JsonObject body, boolean auth) throws Exception {
-        HttpRequest.Builder builder = request(path)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body), StandardCharsets.UTF_8));
-        if (auth) {
-            builder.header("Authorization", "Bearer " + token);
-        }
-        return HTTP.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        String json = GSON.toJson(body);
+        String bearer = token;
+        return send(base -> {
+            HttpRequest.Builder builder = request(base, path)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8));
+            if (auth) {
+                builder.header("Authorization", "Bearer " + bearer);
+            }
+            return builder.build();
+        });
     }
 
-    private static HttpRequest.Builder request(String path) {
-        return HttpRequest.newBuilder(URI.create(PpltradesConfig.get().apiUrl + path))
+    private static HttpResponse<String> get(String path) throws Exception {
+        return send(base -> request(base, path).GET().build());
+    }
+
+    /** Запрос через ApiTransport (зеркала, прокси); при полной недоступности — подсказка игроку. */
+    private static HttpResponse<String> send(java.util.function.Function<String, HttpRequest> request) throws Exception {
+        try {
+            HttpResponse<String> response = ApiTransport.send(request);
+            unreachableNotified = false;
+            failures = 0;
+            retryAtMs = 0;
+            return response;
+        } catch (java.io.IOException e) {
+            notifyUnreachable();
+            // VPN часто «моргает» при переключении: пробуем снова через 30 с, 1, 2, затем каждые 5 мин
+            long delay = RETRY_DELAYS_MS[Math.min(failures, RETRY_DELAYS_MS.length - 1)];
+            failures++;
+            retryAtMs = System.currentTimeMillis() + delay;
+            throw e;
+        }
+    }
+
+    private static final long[] RETRY_DELAYS_MS = {30_000, 60_000, 120_000, 300_000};
+    private static volatile int failures;
+    private static volatile long retryAtMs;
+
+    /** Пора повторить запросы после сбоя связи (вызывается из игрового тика). */
+    public static boolean retryDue() {
+        long at = retryAtMs;
+        if (at == 0 || System.currentTimeMillis() < at) {
+            return false;
+        }
+        retryAtMs = 0;
+        return true;
+    }
+
+    /** Один раз за «отключение» пишем в чат, что сервер цен недоступен и что можно сделать. */
+    private static void notifyUnreachable() {
+        if (unreachableNotified || !PpltradesConfig.get().notifyUnreachable) {
+            return;
+        }
+        unreachableNotified = true;
+        boolean proxy = ApiTransport.hasProxy();
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> {
+            if (mc.player != null) {
+                mc.player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(proxy
+                                ? "ppltrades.message.api_unreachable.proxy" : "ppltrades.message.api_unreachable")
+                        .withStyle(net.minecraft.ChatFormatting.GOLD));
+            }
+        });
+    }
+
+    private static HttpRequest.Builder request(String base, String path) {
+        return HttpRequest.newBuilder(URI.create(base + path))
                 .timeout(Duration.ofSeconds(15))
                 .header("User-Agent", "PPLTrades/" + modVersion());
     }

@@ -27,6 +27,7 @@ public final class SignSearch {
     private static final boolean JEI_LOADED = FabricLoader.getInstance().isModLoaded("jei");
 
     private static KeyMapping searchKey;
+    private static KeyMapping infoKey;
 
     private SignSearch() {
     }
@@ -38,10 +39,18 @@ public final class SignSearch {
                 InputConstants.KEY_N,
                 Ppltrades.KEY_CATEGORY
         ));
+        infoKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "key.ppltrades.item_info",
+                InputConstants.Type.KEYBOARD,
+                InputConstants.KEY_I,
+                Ppltrades.KEY_CATEGORY
+        ));
     }
 
     public static void onScreenKeyPress(Screen screen, KeyEvent event) {
-        if (!searchKey.matches(event) || isTyping(screen)) {
+        boolean search = searchKey.matches(event);
+        boolean info = infoKey.matches(event) && !(screen instanceof ItemInfoScreen);
+        if (!(search || info) || isTyping(screen)) {
             return;
         }
 
@@ -49,7 +58,15 @@ public final class SignSearch {
         if (stack == null || stack.isEmpty()) {
             return;
         }
+        if (search) {
+            search(stack);
+        } else {
+            Minecraft.getInstance().gui.setScreen(new ItemInfoScreen(screen, stack));
+        }
+    }
 
+    /** Запустить поиск предмета по табличкам (Pochatok). Можно вызывать и из окна предмета. */
+    public static void search(ItemStack stack) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
             return;
@@ -80,11 +97,43 @@ public final class SignSearch {
 
         // Клиентская команда Pochatok; Fabric перехватывает её и не отправляет на сервер.
         mc.player.connection.sendCommand(SEARCH_COMMAND + " " + mask);
-        mc.gui.hud.setOverlayMessage(Component.translatable("ppltrades.message.searching_signs", itemName), false);
+        showSearchToast(mc, PpltradesConfig.get().searchOverlay, itemName, mask);
+    }
+
+    /** Одно уведомление на поиск: новый поиск обновляет его, а не складывает в очередь. */
+    private static final net.minecraft.client.gui.components.toasts.SystemToast.SystemToastId SEARCH_TOAST =
+            new net.minecraft.client.gui.components.toasts.SystemToast.SystemToastId(6000L);
+
+    /**
+     * Уведомление в правом верхнем углу (на тёмной плашке, читается поверх любого фона):
+     * заголовок «Поиск по табличкам», ниже — название предмета и/или реальный фильтр (regex для Pochatok).
+     */
+    static void showSearchToast(Minecraft mc, PpltradesConfig.SearchOverlay mode, Component itemName, String mask) {
+        Component title;
+        Component body;
+        switch (mode) {
+            case OFF -> {
+                return;
+            }
+            case ITEM_NAME -> {
+                title = Component.translatable("ppltrades.message.searching_signs.title");
+                body = itemName.copy().withStyle(ChatFormatting.WHITE);
+            }
+            case FILTER -> {
+                title = Component.translatable("ppltrades.message.searching_signs.title");
+                body = Component.literal(mask).withStyle(ChatFormatting.YELLOW);
+            }
+            default -> { // BOTH
+                title = Component.translatable("ppltrades.message.searching_signs", itemName);
+                body = Component.literal(mask).withStyle(ChatFormatting.YELLOW);
+            }
+        }
+        net.minecraft.client.gui.components.toasts.SystemToast.addOrUpdate(mc.gui.toastManager(), SEARCH_TOAST,
+                title, body);
     }
 
     /** Предмет под курсором: слот контейнера, затем JEI (список, закладки, окно рецептов). */
-    private static ItemStack getHoveredStack(Screen screen) {
+    static ItemStack getHoveredStack(Screen screen) {
         if (screen instanceof AbstractContainerScreen<?>) {
             Slot slot = ((AbstractContainerScreenAccessor) screen).ppltrades$getHoveredSlot();
             if (slot != null && slot.hasItem()) {
@@ -95,7 +144,7 @@ public final class SignSearch {
     }
 
     /** Не реагируем на клавишу, пока игрок печатает в текстовом поле (поиск в творческом/JEI, наковальня и т.п.). */
-    private static boolean isTyping(Screen screen) {
+    static boolean isTyping(Screen screen) {
         if (screen.getFocused() instanceof EditBox box && box.isFocused()) {
             return true;
         }
