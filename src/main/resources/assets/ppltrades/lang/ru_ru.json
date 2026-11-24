@@ -134,5 +134,10 @@
   "ppltrades.info.col.seller": "Продавец",
   "ppltrades.info.highlighted": "Бочка %s подсвечена (видно сквозь стены), координаты скопированы. Повторный клик или открытие бочки — снять",
   "ppltrades.info.highlight_cleared": "Подсветка снята",
-  "ppltrades.message.searching_signs.title": "Поиск по табличкам"
+  "ppltrades.message.searching_signs.title": "Поиск по табличкам",
+  "ppltrades.message.api_restored": "[PPLTrades] Связь с сервером цен восстановлена",
+  "ppltrades.update.available": "[PPLTrades] Доступна новая версия %s (у вас %s).",
+  "ppltrades.update.download": "[Скачать]",
+  "ppltrades.config.notify_updates": "Сообщать об обновлениях",
+  "ppltrades.config.notify_updates.tooltip": "Один раз за запуск игры написать в чат о новой версии мода со ссылкой на загрузку."
 }

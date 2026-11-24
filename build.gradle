@@ -75,6 +75,12 @@ tasks.register('testConfigScreenValues', JavaExec) {
     mainClass = 'ru.sink_q.ppltrades.compat.modmenu.ConfigScreenValuesTest'
 }
 
+tasks.register('testUpdateNotice', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ru.sink_q.ppltrades.UpdateNoticeTest'
+}
+
 tasks.register('testApiTransport', JavaExec) {
     group = 'verification'
     classpath = sourceSets.test.runtimeClasspath
@@ -104,7 +110,7 @@ tasks.register('signSearchCoverage', JavaExec) {
 tasks.named('test') {
     // Проверки запускаются обычными Java main, без зависимости от JUnit.
     failOnNoDiscoveredTests = false
-    dependsOn 'testSignSearchMasks', 'testConfigScreenValues', 'testApiTransport'
+    dependsOn 'testSignSearchMasks', 'testConfigScreenValues', 'testApiTransport', 'testUpdateNotice'
 }
 
 jar {

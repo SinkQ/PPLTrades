@@ -35,7 +35,7 @@ import ru.sink_q.ppltrades.TradeCategories;
 /**
  * Собирает цены из бочек-магазинов: когда игрок открывает бочку, к которой прикреплена табличка,
  * запоминаем предмет, который в ней лежит, и текст табличек. Цену из текста разбирает бэкенд.
- * Пустые бочки (товар закончился) не учитываются.
+ * Пустая бочка с табличкой отправляется как «распродано», чтобы её старая цена перестала учитываться.
  */
 public final class BarrelCollector {
     /** Сколько тиков ждать содержимое бочки от сервера. */
@@ -113,6 +113,7 @@ public final class BarrelCollector {
         Map<String, Integer> counts = new LinkedHashMap<>();
         Map<String, ItemStack> samples = new LinkedHashMap<>();
         Map<String, List<Integer>> slotCounts = new LinkedHashMap<>();
+        boolean hasOther = false;
         for (int i = 0; i < container.getContainerSize(); i++) {
             ItemStack stack = container.getItem(i);
             if (stack.isEmpty() || CURRENCY.contains(stack.getItem())) {
@@ -120,18 +121,13 @@ public final class BarrelCollector {
             }
             String key = ItemVariants.priceKey(stack);
             if (key == null) {
+                hasOther = true;
                 continue; // предметы модов
             }
             counts.merge(key, stack.getCount(), Integer::sum);
             samples.putIfAbsent(key, stack);
             slotCounts.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(stack.getCount());
         }
-        if (counts.isEmpty()) {
-            return null;
-        }
-        String key = counts.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow().getKey();
-        ItemStack sample = samples.get(key);
-
         JsonArray signs = collectSigns(level, barrel);
         if (signs.isEmpty()) {
             return null;
@@ -146,6 +142,18 @@ public final class BarrelCollector {
         report.addProperty("x", barrel.getX());
         report.addProperty("y", barrel.getY());
         report.addProperty("z", barrel.getZ());
+        report.add("signs", signs);
+        if (counts.isEmpty()) {
+            if (hasOther) {
+                return null; // только предметы модов: сервер о них не знает, но бочка не пустая
+            }
+            // Пусто или одна оплата алмазами: товар раскупили, сервер уберёт старую цену этой бочки
+            report.addProperty("empty", true);
+            return report;
+        }
+
+        String key = counts.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow().getKey();
+        ItemStack sample = samples.get(key);
         report.addProperty("item", TradeCategories.itemPath(sample));
         String variant = ItemVariants.variant(sample);
         if (variant != null) {
@@ -154,7 +162,6 @@ public final class BarrelCollector {
         report.addProperty("count", counts.get(key));
         report.addProperty("maxStack", sample.getMaxStackSize());
         report.addProperty("distinctItems", counts.size());
-        report.add("signs", signs);
 
         // Все товары бочки: сервер выберет тот, о котором написано на табличке. Наполнитель бывает
         // многочисленнее товара (бочка зарядов ветра, а продаётся книга "Порыв ветра").

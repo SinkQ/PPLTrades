@@ -200,7 +200,13 @@ public final class PriceApi {
                 HttpResponse<String> response = get("/v1/config");
                 if (response.statusCode() == 200) {
                     Set<String> worlds = new HashSet<>();
-                    JsonElement list = JsonParser.parseString(response.body()).getAsJsonObject().get("tradingWorlds");
+                    JsonObject config = JsonParser.parseString(response.body()).getAsJsonObject();
+                    JsonElement latest = config.get("latestVersion");
+                    JsonElement url = config.get("downloadUrl");
+                    if (latest != null && latest.isJsonPrimitive() && url != null && url.isJsonPrimitive()) {
+                        ru.sink_q.ppltrades.UpdateNotice.onConfig(latest.getAsString(), url.getAsString());
+                    }
+                    JsonElement list = config.get("tradingWorlds");
                     if (list == null || !list.isJsonArray()) {
                         return;
                     }
@@ -451,18 +457,40 @@ public final class PriceApi {
             java.util.function.Function<String, HttpRequest> request) throws java.io.IOException, InterruptedException {
         try {
             ApiTransport.Response response = ApiTransport.send(pinnedBase, request);
+            if (unreachableNotified) {
+                notifyRestored();
+            }
             unreachableNotified = false;
             failures = 0;
             retryAtMs = 0;
             return response;
         } catch (java.io.IOException e) {
-            notifyUnreachable();
             // VPN часто «моргает» при переключении: пробуем снова через 30 с, 1, 2, затем каждые 5 мин
             long delay = RETRY_DELAYS_MS[Math.min(failures, RETRY_DELAYS_MS.length - 1)];
             failures++;
             retryAtMs = System.currentTimeMillis() + delay;
+            // одно медленное подключение — не повод писать в чат; сообщаем после нескольких неудач подряд
+            if (failures >= NOTIFY_AFTER_FAILURES) {
+                notifyUnreachable();
+            }
             throw e;
         }
+    }
+
+    /** Сколько неудачных попыток подряд (~2–3 мин с учётом повторов) до сообщения в чат. */
+    private static final int NOTIFY_AFTER_FAILURES = 3;
+
+    private static void notifyRestored() {
+        if (!PpltradesConfig.get().notifyUnreachable) {
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> {
+            if (mc.player != null) {
+                mc.player.sendSystemMessage(net.minecraft.network.chat.Component.translatable(
+                        "ppltrades.message.api_restored").withStyle(net.minecraft.ChatFormatting.GREEN));
+            }
+        });
     }
 
     private static final long[] RETRY_DELAYS_MS = {30_000, 60_000, 120_000, 300_000};
@@ -498,7 +526,7 @@ public final class PriceApi {
 
     private static HttpRequest.Builder request(String base, String path) {
         return HttpRequest.newBuilder(URI.create(base + path))
-                .timeout(Duration.ofSeconds(15))
+                .timeout(Duration.ofSeconds(30)) // запрос целиком; через медленный VPN 15 с иногда не хватало
                 .header("User-Agent", "PPLTrades/" + modVersion());
     }
 

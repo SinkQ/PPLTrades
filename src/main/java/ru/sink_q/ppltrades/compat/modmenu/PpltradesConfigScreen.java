@@ -112,6 +112,8 @@ final class PpltradesConfigScreen {
                 .build());
         prices.addEntry(toggle(entries, "notify_unreachable", config.notifyUnreachable, true,
                 v -> config.notifyUnreachable = v));
+        prices.addEntry(toggle(entries, "notify_updates", config.notifyUpdates, true,
+                v -> config.notifyUpdates = v));
 
         var search = builder.getOrCreateCategory(text("sign_search"));
         search.addEntry(entries.startEnumSelector(text("search_overlay"), PpltradesConfig.SearchOverlay.class,

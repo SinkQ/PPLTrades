@@ -71,6 +71,8 @@ public final class PpltradesConfig {
     // --- сеть ------------------------------------------------------------------------------------
     /** Писать в чат, если сервер цен недоступен. */
     public boolean notifyUnreachable = true;
+    /** Сообщать в чате о новой версии мода (ссылку даёт сервер цен). */
+    public boolean notifyUpdates = true;
 
     public enum TooltipTrigger { SHIFT, ALT, CONTROL, ALWAYS }
 

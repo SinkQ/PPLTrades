@@ -47,6 +47,36 @@ public final class SignSearchMaskTest {
         check(mask("iron_ingot", catalog.get("iron_ingot"), null, null), "Блок железа|64 шт - 4 алм", false);
         check(mask("quartz", catalog.get("quartz"), null, null), "Кварц|1 стак - 1 алм", true);
         check(mask("quartz", catalog.get("quartz"), null, null), "Кварц руда|32 шт - 1 алм", false);
+        Pattern oak = mask("oak_log", catalog.get("oak_log"), null, null);
+        for (String sign : List.of("Дуб|1 ст - 2 алм|Payziii", "Дуб/берёза|1 стак - 2 алм", "Дубовые брёвна|1 ст",
+                "ДубовоеБревно|1 ст - 1 алм", "Бревна дуба|1 ст - 1 алм", "Дуб|слот - 1 алм")) {
+            check(oak, sign, true);
+        }
+        for (String sign : List.of("Тёмный дуб|1 ст - 2 алм", "Древесина|Темный дуб|Слот - 1алм",
+                "Бледный дуб|1 ст - 2 алм", "Бревно тёмного дуба|1 ст", "Общие таблички|Только дуб|ИНАЧЕ НЕ РАБРО",
+                "Дубовая листва|64шт - 1 алм", "Доски дуб|1 ст - 1 алм", "Саженец|дуб|1 шт", "Дубовые доски|1 ст")) {
+            check(oak, sign, false);
+        }
+        check(mask("dark_oak_log", catalog.get("dark_oak_log"), null, null), "Древесина|Темный дуб|Слот - 1алм", true);
+        check(mask("dark_oak_log", catalog.get("dark_oak_log"), null, null), "Дуб|1 ст - 2 алм", false);
+        check(mask("pale_oak_log", catalog.get("pale_oak_log"), null, null), "Тёмный дуб|1 ст - 2 алм", false);
+        check(mask("birch_log", catalog.get("birch_log"), null, null), "Дуб/берёза|1 стак - 2 алм", true);
+        check(mask("acacia_log", catalog.get("acacia_log"), null, null), "Акация (log)|1 слот - 1алм", true);
+        check(mask("spruce_log", catalog.get("spruce_log"), null, null), "саженец ели|1 сажанец= 1 алм", false);
+        check(mask("poplar_log", catalog.get("poplar_log"), null, null), "Саженцы тополя|16шт - 1алм", false);
+        check(mask("mangrove_log", catalog.get("mangrove_log"), null, null), "Мангровые корни|1 слот -1 алмаз", false);
+        Pattern netherite = mask("netherite_ingot", catalog.get("netherite_ingot"), null, null);
+        for (String sign : List.of("Незерит|1шт.-40алм", "НЕЗЕРИТ|1 слиток - 23алм", "Незерит|30 алм - 1 шт",
+                "Незерит|===============|1шт - 42алм|QUASAR_69", "☺ ★ Незерит ★ ☺ |☽ дешевый ☽|1 шт - 39 алм",
+                "Незерит. Слиток|1 Слот - 35 АЛМ", "Незеритовый|слиток|1шт - 32 алм",
+                "Незеритовые|слитки|1шт-27алм", "НЕЗЕРИТОВЫЙ|⛏слиток⛏|1шт. - 39 алм", "НЕЗЕРИТОВЫЙ|[СлИтОк]|1шт")) {
+            check(netherite, sign, true);
+        }
+        for (String sign : List.of("незерит. лом|1шт - 9 алм", "незерит обломки|3шт - 18алм",
+                "Незеритовое|улучшение|1 шт - 9 алм", "Незерит блок|1 шт - 300 алм", "Незерит|1 блок - 300 алм",
+                "Незеритовые|топоры|1 шт - 20 аб", "Незерак|4ст - 1алм")) {
+            check(netherite, sign, false);
+        }
         check(mask("cobbled_deepslate", catalog.get("cobbled_deepslate"), null, null),
                 "Кол. глуб.|сланец|1 слот - 1 алм", true);
         check(mask("deepslate", catalog.get("deepslate"), null, null),

@@ -35,6 +35,8 @@ import java.util.function.Function;
  */
 final class ApiTransport {
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(8);
+    // через VPN/прокси (особенно XHTTP/Reality) новый туннель иногда открывается 10+ секунд
+    private static final Duration PROXY_CONNECT_TIMEOUT = Duration.ofSeconds(20);
     private static final long PROXY_REDETECT_MS = 60_000;
     private static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
@@ -100,9 +102,18 @@ final class ApiTransport {
             String base = attempt.getKey();
             Route route = attempt.getValue();
             try {
-                HttpResponse<String> response = client(route).send(request.apply(base),
-                        HttpResponse.BodyHandlers.limiting(HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8),
-                                MAX_RESPONSE_BYTES));
+                var handler = HttpResponse.BodyHandlers.limiting(
+                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8), MAX_RESPONSE_BYTES);
+                HttpResponse<String> response;
+                try {
+                    response = client(route).send(request.apply(base), handler);
+                } catch (java.net.http.HttpTimeoutException slow) {
+                    if (route.proxy() == null) {
+                        throw slow;
+                    }
+                    // медленный туннель через прокси: один повтор на новом соединении, прежде чем сдаться
+                    response = client(route).send(request.apply(base), handler);
+                }
                 if (response.statusCode() >= 300 && response.statusCode() < 400) {
                     throw new IOException("Перенаправление сервиса цен не разрешено");
                 }
@@ -146,7 +157,7 @@ final class ApiTransport {
     private static HttpClient client(Route route) {
         return CLIENTS.computeIfAbsent(route, r -> {
             HttpClient.Builder b = HttpClient.newBuilder()
-                    .connectTimeout(CONNECT_TIMEOUT)
+                    .connectTimeout(r.proxy() == null ? CONNECT_TIMEOUT : PROXY_CONNECT_TIMEOUT)
                     .followRedirects(HttpClient.Redirect.NEVER);
             b.proxy(r.proxy() == null ? HttpClient.Builder.NO_PROXY : ProxySelector.of(r.proxy()));
             return b.build();

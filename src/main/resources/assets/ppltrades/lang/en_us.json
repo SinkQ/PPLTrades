@@ -134,5 +134,10 @@
   "ppltrades.info.col.seller": "Seller",
   "ppltrades.info.highlighted": "Barrel %s highlighted (visible through walls), coordinates copied. Click again or open the barrel to clear",
   "ppltrades.info.highlight_cleared": "Highlight cleared",
-  "ppltrades.message.searching_signs.title": "Sign search"
+  "ppltrades.message.searching_signs.title": "Sign search",
+  "ppltrades.message.api_restored": "[PPLTrades] Connection to the price server restored",
+  "ppltrades.update.available": "[PPLTrades] A new version %s is available (you have %s).",
+  "ppltrades.update.download": "[Download]",
+  "ppltrades.config.notify_updates": "Notify about updates",
+  "ppltrades.config.notify_updates.tooltip": "Once per game launch, post a chat message about a new mod version with a download link."
 }

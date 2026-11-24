@@ -60,6 +60,43 @@ final class SignSearchMask {
             Map.entry("firework_rocket", List.of("фейерверки", "ракета", "ракеты")),
             Map.entry("shulker_shell", List.of("панцирь шалкера", "панцири шалкера"))
     );
+    // --- брёвна: на табличках чаще пишут просто породу («Дуб / 1 ст - 2 алм», «Акация (log)») ---
+    private static final String GAP = "[^\\p{L}\\p{N}]+";
+    private static final String NOT_DARK_OR_PALE = "(?<!(?:т[её]мн|бледн)\\p{L}{1,3}[^\\p{L}\\p{N}]{1,5})";
+    // «Доски дуб / 1 ст», «Саженец дуб» — не бревно
+    private static final String NOT_OTHER_WOOD_ITEM = "(?<!(?:сажен|лист|доск|забор|двер|люк|плит|ступен|таблич"
+            + "|калит|лод|кноп)\\p{L}{0,6}[^\\p{L}\\p{N}]{1,5})";
+    private static final String ANY_TREE = "(?:(?:т[её]мный|бледный)" + GAP
+            + ")?(?:дуб|бер[её]за|ель|акация|джунгли|мангра?|вишня|сакура|тополь)";
+    // порода (или перечисление пород «дуб/берёза»), дальше сразу количество
+    private static final String THEN_QUANTITY = "(?=(?:" + GAP + ANY_TREE + ")*" + GAP + "(?:log" + GAP
+            + ")?(?:\\d|слот|стак|ст(?!\\p{L})|шт))";
+    private static final Map<String, Tree> LOGS = Map.of(
+            "oak_log", new Tree("дубов\\p{L}{2}", "дуб", "дуба", NOT_DARK_OR_PALE),
+            "dark_oak_log", new Tree("т[её]мно[\\s\\p{Pd}]*дубов\\p{L}{2}|т[её]мн\\p{L}{2}" + GAP + "дубов\\p{L}{2}",
+                    "т[её]мный" + GAP + "дуб", "т[её]много" + GAP + "дуба", ""),
+            "pale_oak_log", new Tree("бледн\\p{L}{2}" + GAP + "дубов\\p{L}{2}",
+                    "бледный" + GAP + "дуб", "бледного" + GAP + "дуба", ""),
+            "birch_log", new Tree("бер[её]зов\\p{L}{2}", "бер[её]за", "бер[её]зы", ""),
+            "spruce_log", new Tree("елов\\p{L}{2}", "ель", "ели", ""),
+            "acacia_log", new Tree("акациев\\p{L}{2}", "акация", "акации", ""),
+            "jungle_log", new Tree("джунглев\\p{L}{2}|тропическ\\p{L}{2}",
+                    "джунгли|(?:джунглевое|тропическое)" + GAP + "дерево", "джунглей", ""),
+            "mangrove_log", new Tree("мангров\\p{L}{2}", "мангра?|мангровое" + GAP + "дерево", "мангры?", ""),
+            "cherry_log", new Tree("вишн[её]в\\p{L}{2}", "вишня|сакура", "вишни|сакуры", ""),
+            "poplar_log", new Tree("топол(?:ев|ин)\\p{L}{2}", "тополь", "тополя", "")
+    );
+
+    /** Как породу называют на табличках: прилагательное, именительный и родительный падеж. */
+    private record Tree(String adjective, String nominative, String genitive, String notAfter) {
+        void addTo(Set<String> names) {
+            // «Дубовые брёвна», «МангровоеБревно», «Мангровое бревн,»
+            names.add(notAfter + "(?:" + adjective + ")[\\s\\p{Pd}]*бр[её]в\\p{L}*");
+            names.add("бр[её]в\\p{L}*" + GAP + "(?:" + genitive + ")");
+            names.add(notAfter + NOT_OTHER_WOOD_ITEM + "(?:" + nominative + ")" + THEN_QUANTITY);
+        }
+    }
+
     private static final Map<String, List<String>> TRADE_ALIASES = loadTradeAliases();
 
     private SignSearchMask() {
@@ -81,6 +118,9 @@ final class SignSearchMask {
         if (vanillaPath != null) {
             ALIASES.getOrDefault(vanillaPath, List.of()).forEach(name -> addName(names, name));
             TRADE_ALIASES.getOrDefault(vanillaPath, List.of()).forEach(name -> addName(names, name));
+            if (LOGS.containsKey(vanillaPath)) {
+                LOGS.get(vanillaPath).addTo(names);
+            }
             switch (vanillaPath) {
                 case "redstone_block" -> {
                     names.add(REDSTONE + DECORATED_SEPARATOR + BLOCK);
@@ -98,6 +138,13 @@ final class SignSearchMask {
                 case "iron_ingot" -> names.add("железо(?=" + PIECES + ")");
                 case "gold_ingot" -> names.add("золото(?=" + PIECES + ")");
                 case "copper_ingot" -> names.add("медь(?=" + PIECES + ")");
+                // «Незерит» в торговле — слиток. «Незерит лом», «обломки», «улучшение» не подходят:
+                // после слова должны идти количество/цена, «слиток» или «дешёвый».
+                case "netherite_ingot" -> {
+                    names.add("незерит(?=[^\\p{L}\\p{N}]+(?:слит|деш[её]в|\\d))(?!" + BLOCK_QUANTITY + ")");
+                    // «Незеритовые слитки», «незеритовый ⛏слиток⛏», «незеритовый [слиток]»
+                    names.add("незеритовы[йе](?=[^\\p{L}\\p{N}]+слит)");
+                }
                 case "quartz" -> names.add("кварц(?=" + PRICE_START + ")(?!" + BLOCK_QUANTITY + ")");
                 case "slime_ball" -> names.add("слизь(?=" + PRICE_START + ")(?!" + BLOCK_QUANTITY + ")");
                 // На табличке «Порыв ветра» может быть и зарядом, и книгой. «Книга» или
