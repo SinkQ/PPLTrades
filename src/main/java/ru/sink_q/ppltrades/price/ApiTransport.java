@@ -13,12 +13,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /**
@@ -173,7 +175,7 @@ final class ApiTransport {
         if (!mode.equalsIgnoreCase("system")) {
             InetSocketAddress explicit = parseProxy(mode);
             if (explicit == null) {
-                Ppltrades.LOGGER.warn("Неверный proxy в конфиге PPLTrades: {} (нужно http://host:port)", mode);
+                Ppltrades.LOGGER.warn("Неверный proxy в конфиге PPLTrades (нужно http://host:port)");
             }
             return explicit;
         }
@@ -213,8 +215,23 @@ final class ApiTransport {
     private static InetSocketAddress windowsProxy() {
         String key = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
         Map<String, String> values = new LinkedHashMap<>();
+        String windows = System.getenv("SystemRoot");
+        if (windows == null || windows.isBlank()) {
+            return null;
+        }
+        Process process = null;
         try {
-            Process process = new ProcessBuilder("reg", "query", key).redirectErrorStream(true).start();
+            Path reg = Path.of(windows, "System32", "reg.exe");
+            if (!reg.isAbsolute()) {
+                return null;
+            }
+            process = new ProcessBuilder(reg.toString(), "query", key)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+            // Ждём до чтения, иначе readLine() может обойти таймаут. Если ключ
+            // необычно большой и заполнит pipe, перейдём к проверке переменных окружения.
+            if (!process.waitFor(2, TimeUnit.SECONDS) || process.exitValue() != 0) {
+                return null;
+            }
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(),
                     StandardCharsets.UTF_8))) {
                 String line;
@@ -225,9 +242,15 @@ final class ApiTransport {
                     }
                 }
             }
-            process.waitFor();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
         } catch (Exception e) {
             return null;
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
         }
         String enabled = values.getOrDefault("ProxyEnable", "0x0");
         String server = values.get("ProxyServer");

@@ -61,6 +61,9 @@ public final class SignSearchMaskTest {
         check(mask("dark_oak_log", catalog.get("dark_oak_log"), null, null), "Дуб|1 ст - 2 алм", false);
         check(mask("pale_oak_log", catalog.get("pale_oak_log"), null, null), "Тёмный дуб|1 ст - 2 алм", false);
         check(mask("birch_log", catalog.get("birch_log"), null, null), "Дуб/берёза|1 стак - 2 алм", true);
+        check(oak, "Дуб/берёза/ель/акация|1 ст - 2 алм", true);
+        check(oak, "Дуб ".repeat(8192) + "не продаётся", false);
+        check(oak, "Дуб" + "-".repeat(16384) + "2 ст", true);
         check(mask("acacia_log", catalog.get("acacia_log"), null, null), "Акация (log)|1 слот - 1алм", true);
         check(mask("spruce_log", catalog.get("spruce_log"), null, null), "саженец ели|1 сажанец= 1 алм", false);
         check(mask("poplar_log", catalog.get("poplar_log"), null, null), "Саженцы тополя|16шт - 1алм", false);
@@ -89,6 +92,15 @@ public final class SignSearchMaskTest {
         check(custom, "РЭД—(БЛОК)+", true);
         check(custom, "рэд блок", false);
         check(custom, "редстоун блок", true);
+        List<String> manyAliases = new java.util.ArrayList<>();
+        manyAliases.add("а".repeat(129));
+        manyAliases.add("ред пыль");
+        manyAliases.addAll(java.util.Collections.nCopies(30, "другое имя"));
+        manyAliases.add("лишнее имя");
+        Pattern bounded = mask("redstone", catalog.get("redstone"), null, manyAliases);
+        check(bounded, "ред пыль", true);
+        check(bounded, "а".repeat(129), false);
+        check(bounded, "лишнее имя", false);
         check(mask(null, null, "Новый предмет", null), "Новый||предмет|1 шт", true);
     }
 

@@ -1,5 +1,5 @@
 plugins {
-    id 'net.fabricmc.fabric-loom' version '1.19-SNAPSHOT'
+    id 'net.fabricmc.fabric-loom' version '1.19.4'
 }
 
 version = project.mod_version
@@ -87,6 +87,24 @@ tasks.register('testApiTransport', JavaExec) {
     mainClass = 'ru.sink_q.ppltrades.price.ApiTransportTest'
 }
 
+tasks.register('testPriceStatsValidation', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ru.sink_q.ppltrades.price.PriceStatsValidationTest'
+}
+
+tasks.register('testPrivateJsonFiles', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ru.sink_q.ppltrades.PrivateJsonFilesTest'
+}
+
+tasks.register('testQueueJson', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'ru.sink_q.ppltrades.price.QueueJsonTest'
+}
+
 tasks.register('signSearchCoverage', JavaExec) {
     group = 'verification'
     description = 'Audits local/test-only sign search coverage against a JSONL export.'
@@ -110,7 +128,8 @@ tasks.register('signSearchCoverage', JavaExec) {
 tasks.named('test') {
     // Проверки запускаются обычными Java main, без зависимости от JUnit.
     failOnNoDiscoveredTests = false
-    dependsOn 'testSignSearchMasks', 'testConfigScreenValues', 'testApiTransport', 'testUpdateNotice'
+    dependsOn 'testSignSearchMasks', 'testConfigScreenValues', 'testApiTransport', 'testUpdateNotice',
+            'testPriceStatsValidation', 'testPrivateJsonFiles', 'testQueueJson'
 }
 
 jar {

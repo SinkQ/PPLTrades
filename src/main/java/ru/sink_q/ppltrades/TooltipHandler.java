@@ -262,15 +262,17 @@ public final class TooltipHandler {
      */
     private static Component mainCell(Stat stat, PriceStats cur, PriceStats prev, int unit,
                                       PpltradesConfig.TrendMode mode) {
-        String now = cur == null ? null : format(stat.of(cur) * unit);
+        Double currentValue = cur == null ? null : stat.of(cur) * unit;
+        String now = currentValue == null ? null : format(currentValue);
         MutableComponent cell = Component.literal(now == null ? "—" : now).withStyle(ChatFormatting.AQUA);
         if (prev == null || mode == PpltradesConfig.TrendMode.OFF) {
             return cell;
         }
-        String before = format(stat.of(prev) * unit);
+        double previousValue = stat.of(prev) * unit;
+        String before = format(previousValue);
         Component arrow = Component.empty();
-        if (now != null) {
-            int cmp = new BigDecimal(now).compareTo(new BigDecimal(before));
+        if (currentValue != null && Double.isFinite(currentValue) && Double.isFinite(previousValue)) {
+            int cmp = Double.compare(currentValue, previousValue);
             if (cmp > 0) {
                 arrow = Component.literal("▲").withStyle(ChatFormatting.RED);
             } else if (cmp < 0) {

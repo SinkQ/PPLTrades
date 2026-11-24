@@ -10,8 +10,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.User;
 import ru.sink_q.ppltrades.Ppltrades;
 import ru.sink_q.ppltrades.PpltradesConfig;
+import ru.sink_q.ppltrades.PrivateJsonFiles;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.net.URI;
 import java.net.http.HttpRequest;
@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Pattern;
 
 /**
  * Клиент бэкенда цен: авторизация через сессию Mojang, отправка наблюдений из бочек, загрузка статистики.
@@ -39,11 +40,14 @@ public final class PriceApi {
     private static final int MAX_QUEUE = 2000;
     private static final int MAX_BATCH = 50;
     private static final long AUTH_RETRY_DELAY_MS = 3 * 60 * 1000L;
+    private static final Pattern BEARER_TOKEN = Pattern.compile("[A-Za-z0-9._~+/-]++=*");
 
-    /** Токен бэкенда переживает перезапуск игры, чтобы не дёргать сессионный сервер Mojang (у него лимиты). */
-    private static final Path TOKEN_FILE = FabricLoader.getInstance().getConfigDir().resolve("ppltrades-token.json");
-    /** Неотправленные наблюдения сохраняются при выходе и отправляются при следующем запуске. */
-    private static final Path QUEUE_FILE = FabricLoader.getInstance().getConfigDir().resolve("ppltrades-queue.json");
+    private static final class LocalFiles {
+        /** Токен переживает перезапуск игры, чтобы не дёргать сессионный сервер Mojang. */
+        private static final Path TOKEN = FabricLoader.getInstance().getConfigDir().resolve("ppltrades-token.json");
+        /** Неотправленные наблюдения сохраняются при выходе и отправляются при следующем запуске. */
+        private static final Path QUEUE = FabricLoader.getInstance().getConfigDir().resolve("ppltrades-queue.json");
+    }
 
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "PPLTrades-Network");
@@ -58,7 +62,14 @@ public final class PriceApi {
     private static volatile Map<String, Map<PriceStats.Window, PriceStats.Trend>> prices = Map.of();
 
     // доступ только из сетевого потока
-    private record Session(String base, String token, long expiresAtMs) {}
+    private record Session(String base, String token, long expiresAtMs) {
+        Session {
+            // HttpRequest includes an invalid header value in its diagnostic; reject it first.
+            if (token == null || token.length() > 4096 || !BEARER_TOKEN.matcher(token).matches()) {
+                throw new IllegalArgumentException("Некорректный токен сервиса цен");
+            }
+        }
+    }
     private static Session session;
     private static long authBlockedUntilMs;
     private static boolean unreachableNotified;
@@ -79,32 +90,27 @@ public final class PriceApi {
     public static synchronized void saveQueue() {
         try {
             if (QUEUE.isEmpty()) {
-                Files.deleteIfExists(QUEUE_FILE);
+                PrivateJsonFiles.delete(LocalFiles.QUEUE);
                 return;
             }
-            JsonArray array = new JsonArray();
-            QUEUE.forEach(array::add);
-            Files.writeString(QUEUE_FILE, GSON.toJson(array), StandardCharsets.UTF_8);
+            QueueJson.write(LocalFiles.QUEUE, QUEUE, MAX_QUEUE);
         } catch (Exception e) {
-            Ppltrades.LOGGER.warn("Не удалось сохранить очередь цен: {}", e.toString());
+            Ppltrades.LOGGER.warn("Не удалось сохранить очередь цен");
         }
     }
 
     /** Загрузить сохранённые с прошлого раза наблюдения в очередь. */
     public static synchronized void loadQueue() {
         try {
-            if (!Files.exists(QUEUE_FILE)) {
+            List<JsonObject> saved = QueueJson.read(LocalFiles.QUEUE, Math.max(0, MAX_QUEUE - QUEUE.size()));
+            if (saved == null) {
                 return;
             }
-            for (JsonElement el : JsonParser.parseString(Files.readString(QUEUE_FILE, StandardCharsets.UTF_8)).getAsJsonArray()) {
-                if (el.isJsonObject() && QUEUE.size() < MAX_QUEUE) {
-                    QUEUE.add(el.getAsJsonObject());
-                }
-            }
-            Files.deleteIfExists(QUEUE_FILE);
+            requeue(saved);
+            PrivateJsonFiles.delete(LocalFiles.QUEUE);
             Ppltrades.LOGGER.info("Загружено {} неотправленных наблюдений цен", QUEUE.size());
         } catch (Exception e) {
-            Ppltrades.LOGGER.warn("Не удалось загрузить очередь цен: {}", e.toString());
+            Ppltrades.LOGGER.warn("Не удалось загрузить очередь цен");
         }
     }
 
@@ -247,13 +253,17 @@ public final class PriceApi {
         });
     }
 
-    private static Map<String, Map<PriceStats.Window, PriceStats.Trend>> parsePrices(JsonObject root) {
+    static Map<String, Map<PriceStats.Window, PriceStats.Trend>> parsePrices(JsonObject root) {
         Map<String, Map<PriceStats.Window, PriceStats.Trend>> result = new HashMap<>();
-        JsonObject items = root.getAsJsonObject("items");
-        if (items == null) {
-            return result;
+        JsonElement itemsElement = root.get("items");
+        if (itemsElement == null || !itemsElement.isJsonObject()) {
+            throw new IllegalArgumentException("Missing or invalid prices items object");
         }
+        JsonObject items = itemsElement.getAsJsonObject();
         for (Map.Entry<String, JsonElement> itemEntry : items.entrySet()) {
+            if (!itemEntry.getValue().isJsonObject()) {
+                continue;
+            }
             JsonObject windows = itemEntry.getValue().getAsJsonObject();
             Map<PriceStats.Window, PriceStats.Trend> stats = new EnumMap<>(PriceStats.Window.class);
             for (PriceStats.Window window : PriceStats.Window.values()) {
@@ -270,16 +280,49 @@ public final class PriceApi {
         return result;
     }
 
-    private static PriceStats parseStats(JsonElement el) {
+    private static final double MAX_STAT_PRICE = 900_000.0;
+
+    static PriceStats parseStats(JsonElement el) {
         if (el == null || !el.isJsonObject()) {
             return null;
         }
         JsonObject s = el.getAsJsonObject();
-        return new PriceStats(
-                s.get("min").getAsDouble(),
-                s.get("avg").getAsDouble(),
-                s.get("median").getAsDouble(),
-                s.get("n").getAsInt());
+        try {
+            double min = statPrice(s.get("min"));
+            double avg = statPrice(s.get("avg"));
+            double median = statPrice(s.get("median"));
+            int n = statCount(s.get("n"));
+            // The backend parses at most 100,000 payment units, with diamond blocks worth 9;
+            // min is no greater than either summary.
+            if (min > avg || min > median) {
+                return null;
+            }
+            return new PriceStats(min, avg, median, n);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static double statPrice(JsonElement element) {
+        if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+            throw new IllegalArgumentException("Missing or nonnumeric price statistic");
+        }
+        double value = element.getAsDouble();
+        if (!Double.isFinite(value) || value <= 0 || value > MAX_STAT_PRICE) {
+            throw new IllegalArgumentException("Price statistic outside accepted range");
+        }
+        return value;
+    }
+
+    private static int statCount(JsonElement element) {
+        if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) {
+            throw new IllegalArgumentException("Missing or nonnumeric listing count");
+        }
+        double value = element.getAsDouble();
+        if (!Double.isFinite(value) || value < 1 || value > Integer.MAX_VALUE || value != Math.rint(value)) {
+            throw new IllegalArgumentException("Listing count outside accepted range");
+        }
+        return (int) value;
     }
 
     /** @return false, если отправку стоит прекратить до следующей попытки */
@@ -396,10 +439,11 @@ public final class PriceApi {
     /** Токен с диска, если он выдан этому же аккаунту для этого же бэкенда. */
     private static void loadSavedToken() {
         try {
-            if (!Files.exists(TOKEN_FILE)) {
+            String source = PrivateJsonFiles.readIfExists(LocalFiles.TOKEN, PrivateJsonFiles.TOKEN_MAX_BYTES);
+            if (source == null) {
                 return;
             }
-            JsonObject saved = JsonParser.parseString(Files.readString(TOKEN_FILE, StandardCharsets.UTF_8)).getAsJsonObject();
+            JsonObject saved = JsonParser.parseString(source).getAsJsonObject();
             if (!saved.has("authVersion") || saved.get("authVersion").getAsInt() != AuthProof.VERSION) {
                 return;
             }
@@ -409,7 +453,7 @@ public final class PriceApi {
                 session = new Session(base, saved.get("token").getAsString(), saved.get("expiresAtMs").getAsLong());
             }
         } catch (Exception e) {
-            Ppltrades.LOGGER.warn("Не удалось прочитать сохранённый токен: {}", e.toString());
+            Ppltrades.LOGGER.warn("Не удалось прочитать сохранённый токен");
         }
     }
 
@@ -421,16 +465,16 @@ public final class PriceApi {
             saved.addProperty("apiUrl", session.base());
             saved.addProperty("token", session.token());
             saved.addProperty("expiresAtMs", session.expiresAtMs());
-            Files.writeString(TOKEN_FILE, GSON.toJson(saved), StandardCharsets.UTF_8);
+            PrivateJsonFiles.write(LocalFiles.TOKEN, PrivateJsonFiles.TOKEN_MAX_BYTES, writer -> GSON.toJson(saved, writer));
         } catch (Exception e) {
-            Ppltrades.LOGGER.warn("Не удалось сохранить токен: {}", e.toString());
+            Ppltrades.LOGGER.warn("Не удалось сохранить токен");
         }
     }
 
     private static void forgetToken() {
         session = null;
         try {
-            Files.deleteIfExists(TOKEN_FILE);
+            PrivateJsonFiles.delete(LocalFiles.TOKEN);
         } catch (Exception ignored) {
         }
     }

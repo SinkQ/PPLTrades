@@ -22,6 +22,9 @@ final class SignSearchMask {
     private static final String START_WORD = "(?<![\\p{L}\\p{N}_])";
     private static final String END_WORD = "(?![\\p{L}\\p{N}_])";
     private static final Pattern YO = Pattern.compile("[еёЕЁ]");
+    private static final int MAX_CUSTOM_ALIASES = 32;
+    private static final int MAX_NAME_LENGTH = 128;
+    private static final int MAX_CUSTOM_REGEX_LENGTH = 4096;
 
     private static final String REDSTONE = "(?:р[еэ]дстоу?н|redstone)";
     private static final String BLOCK = "(?:бл(?:ок(?:а|и|ов)?)?|blocks?)";
@@ -61,7 +64,7 @@ final class SignSearchMask {
             Map.entry("shulker_shell", List.of("панцирь шалкера", "панцири шалкера"))
     );
     // --- брёвна: на табличках чаще пишут просто породу («Дуб / 1 ст - 2 алм», «Акация (log)») ---
-    private static final String GAP = "[^\\p{L}\\p{N}]+";
+    private static final String GAP = "[^\\p{L}\\p{N}]++";
     private static final String NOT_DARK_OR_PALE = "(?<!(?:т[её]мн|бледн)\\p{L}{1,3}[^\\p{L}\\p{N}]{1,5})";
     // «Доски дуб / 1 ст», «Саженец дуб» — не бревно
     private static final String NOT_OTHER_WOOD_ITEM = "(?<!(?:сажен|лист|доск|забор|двер|люк|плит|ступен|таблич"
@@ -69,7 +72,7 @@ final class SignSearchMask {
     private static final String ANY_TREE = "(?:(?:т[её]мный|бледный)" + GAP
             + ")?(?:дуб|бер[её]за|ель|акация|джунгли|мангра?|вишня|сакура|тополь)";
     // порода (или перечисление пород «дуб/берёза»), дальше сразу количество
-    private static final String THEN_QUANTITY = "(?=(?:" + GAP + ANY_TREE + ")*" + GAP + "(?:log" + GAP
+    private static final String THEN_QUANTITY = "(?=(?:" + GAP + ANY_TREE + "){0,8}" + GAP + "(?:log" + GAP
             + ")?(?:\\d|слот|стак|ст(?!\\p{L})|шт))";
     private static final Map<String, Tree> LOGS = Map.of(
             "oak_log", new Tree("дубов\\p{L}{2}", "дуб", "дуба", NOT_DARK_OR_PALE),
@@ -154,9 +157,7 @@ final class SignSearchMask {
             }
         }
 
-        if (customAliases != null) {
-            customAliases.forEach(name -> addName(names, name));
-        }
+        addCustomAliases(names, customAliases);
 
         // Для каталога сохраняем поиск по подстроке: «камнерез» ловит и «камнерезы».
         // Новые краткие названия ищем как целые слова: «сено» не должно находиться в нике.
@@ -182,15 +183,37 @@ final class SignSearchMask {
     }
 
     private static void addName(Set<String> alternatives, String name) {
-        if (name == null) {
-            return;
+        String regex = nameRegex(name);
+        if (!regex.isEmpty()) {
+            alternatives.add(regex);
         }
-        String regex = SEPARATORS.splitAsStream(name)
+    }
+
+    private static String nameRegex(String name) {
+        if (name == null || name.length() > MAX_NAME_LENGTH) {
+            return "";
+        }
+        return SEPARATORS.splitAsStream(name)
                 .filter(part -> !part.isEmpty())
                 .map(part -> YO.matcher(Pattern.quote(part)).replaceAll(Matcher.quoteReplacement("\\E[её]\\Q")))
                 .collect(Collectors.joining(SEPARATOR));
-        if (!regex.isEmpty()) {
-            alternatives.add(regex);
+    }
+
+    private static void addCustomAliases(Set<String> names, List<String> customAliases) {
+        if (customAliases == null) {
+            return;
+        }
+        int remaining = MAX_CUSTOM_REGEX_LENGTH;
+        int checked = 0;
+        for (String alias : customAliases) {
+            if (++checked > MAX_CUSTOM_ALIASES) {
+                break;
+            }
+            String regex = nameRegex(alias);
+            int cost = 1 + regex.length();
+            if (!regex.isEmpty() && cost <= remaining && names.add(regex)) {
+                remaining -= cost;
+            }
         }
     }
 }

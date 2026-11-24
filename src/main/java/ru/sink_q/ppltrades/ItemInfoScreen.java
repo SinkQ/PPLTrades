@@ -16,7 +16,6 @@ import ru.sink_q.ppltrades.price.ItemVariants;
 import ru.sink_q.ppltrades.price.PriceApi;
 import ru.sink_q.ppltrades.price.PriceStats;
 
-import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -138,9 +137,10 @@ public final class ItemInfoScreen extends Screen {
         }).bounds(left + bw + gap, by, bw, 20)
                 .tooltip(Tooltip.create(Component.translatable("ppltrades.info.search.tooltip"))).build());
         addRenderableWidget(Button.builder(Component.translatable("ppltrades.info.site"), b -> {
-            if (key != null) {
-                ConfirmLinkScreen.confirmLinkNow(this, URI.create(PpltradesConfig.activeApiUrl() + "/#/item/"
-                        + URLEncoder.encode(key, StandardCharsets.UTF_8).replace("+", "%20")));
+            String apiUrl = PpltradesConfig.activeApiUrl();
+            if (key != null && apiUrl != null && !apiUrl.isBlank()) {
+                ConfirmLinkScreen.confirmLinkNow(this, URI.create(apiUrl + "/#/item/"
+                        + URLEncoder.encode(key, StandardCharsets.UTF_8).replace("+", "%20")), false);
             }
         }).bounds(left + 2 * (bw + gap), by, bw, 20)
                 .tooltip(Tooltip.create(Component.translatable("ppltrades.info.site.tooltip"))).build());
@@ -343,14 +343,17 @@ public final class ItemInfoScreen extends Screen {
             String median = TooltipHandler.format(cur.median() * unit);
             g.text(font, Component.literal(median).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD), x + 5, cy + 16, C_TEXT, true);
             PriceStats prev = t.previous();
-            if (prev != null) {
+            if (prev != null && Double.isFinite(cur.median()) && cur.median() > 0
+                    && Double.isFinite(prev.median()) && prev.median() > 0) {
                 String before = TooltipHandler.format(prev.median() * unit);
-                int cmp = new BigDecimal(median).compareTo(new BigDecimal(before));
+                int cmp = Double.compare(cur.median(), prev.median());
                 if (cmp != 0) {
                     double pct = (cur.median() / prev.median() - 1) * 100;
-                    MutableComponent tr = Component.literal((cmp > 0 ? "▲ +" : "▼ ") + Math.round(pct) + "%")
-                            .withStyle(cmp > 0 ? ChatFormatting.RED : ChatFormatting.GREEN);
-                    g.text(font, tr, x + 10 + font.width(median), cy + 16, C_TEXT, false);
+                    if (Double.isFinite(pct)) {
+                        MutableComponent tr = Component.literal((cmp > 0 ? "▲ +" : "▼ ") + Math.round(pct) + "%")
+                                .withStyle(cmp > 0 ? ChatFormatting.RED : ChatFormatting.GREEN);
+                        g.text(font, tr, x + 10 + font.width(median), cy + 16, C_TEXT, false);
+                    }
                 }
             }
             g.text(font, Component.translatable("ppltrades.info.min_avg",
