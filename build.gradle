@@ -21,6 +21,18 @@ repositories {
             includeGroup "maven.modrinth"
         }
     }
+    exclusiveContent {
+        // me.shedaniel.math.Point из API REI: внутри cloth-config он лежит вложенным jar
+        forRepository {
+            maven {
+                name = "Shedaniel"
+                url = "https://maven.shedaniel.me/"
+            }
+        }
+        filter {
+            includeModule "me.shedaniel.cloth", "basic-math"
+        }
+    }
 }
 
 dependencies {
@@ -30,10 +42,17 @@ dependencies {
 
     // Опциональная интеграция: нужна только для компиляции, в мод не встраивается
     compileOnly "maven.modrinth:jei:${project.jei_version}"
+    compileOnly "maven.modrinth:rei:${project.rei_version}"
+    compileOnly "maven.modrinth:architectury-api:${project.architectury_version}"
+    compileOnly "me.shedaniel.cloth:basic-math:0.6.1"
     compileOnly "maven.modrinth:modmenu:${project.modmenu_version}"
     compileOnly "maven.modrinth:cloth-config:${project.cloth_config_version}"
     runtimeOnly "maven.modrinth:modmenu:${project.modmenu_version}"
     runtimeOnly "maven.modrinth:cloth-config:${project.cloth_config_version}"
+    if (project.hasProperty('testRei')) { // gradlew runClient -PtestRei
+        runtimeOnly "maven.modrinth:rei:${project.rei_version}"
+        runtimeOnly "maven.modrinth:architectury-api:${project.architectury_version}"
+    }
 }
 
 processResources {

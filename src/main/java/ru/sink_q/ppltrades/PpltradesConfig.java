@@ -49,6 +49,8 @@ public final class PpltradesConfig {
     public String proxy = "system";
     /** Отправлять цены из открытых бочек на сервер статистики. */
     public volatile boolean collectPrices = true;
+    /** Если товар выкупили, пока бочка была открыта, при закрытии сообщить, что она распродана. */
+    public boolean reportSoldOutOnClose = true;
     /** Показывать цены в подсказке при зажатом Shift. */
     public boolean showPrices = true;
     /** Дополнительные названия на табличках: {"minecraft:redstone_block": ["ред блок"]}. */

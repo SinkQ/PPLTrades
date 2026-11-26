@@ -64,7 +64,10 @@ public final class TooltipHandler {
     }
 
     public static void append(ItemStack stack, List<Component> lines) {
-        if (stack.isEmpty()) {
+        // REI/EMI строят кэш поиска, собирая тултипы в фоновых потоках. Font (FreeType) и состояние
+        // клавиш не потокобезопасны: Font.width() оттуда портит память и роняет клиент (issue #2).
+        // Цены нужны только в тултипе на экране, а он рисуется в главном потоке.
+        if (stack.isEmpty() || !Minecraft.getInstance().isSameThread()) {
             return;
         }
         PpltradesConfig config = PpltradesConfig.get();

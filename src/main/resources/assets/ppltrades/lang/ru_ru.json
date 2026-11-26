@@ -27,6 +27,8 @@
   "ppltrades.config.show_prices.tooltip": "Показывать статистику цен в подсказках при зажатом Shift на PepeLand.",
   "ppltrades.config.collect_prices": "Отправлять данные о ценах",
   "ppltrades.config.collect_prices.tooltip": "Отправлять сервису цен данные об открытых торговых бочках: товары, координаты и текст табличек.",
+  "ppltrades.config.report_sold_out_on_close": "Сообщать о выкупе при закрытии",
+  "ppltrades.config.report_sold_out_on_close.tooltip": "Если вы выкупили весь товар, пока бочка была открыта, при закрытии мод сообщит, что она распродана, и лот уберётся с сайта.",
   "ppltrades.config.api_url": "Адрес сервиса цен",
   "ppltrades.config.api_url.tooltip": "Укажите базовый HTTPS URL без учётных данных, параметров запроса и фрагмента. Оставьте поле пустым, чтобы отключить загрузку и отправку данных о ценах. Изменения URL вступят в силу после перезапуска игры.",
   "ppltrades.config.api_url.invalid": "Укажите корректный URL https:// без учётных данных, параметров запроса и фрагмента или оставьте поле пустым.",

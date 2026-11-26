@@ -20,6 +20,9 @@
     "jei_mod_plugin": [
       "ru.sink_q.ppltrades.compat.jei.PpltradesJeiPlugin"
     ],
+    "rei_client": [
+      "ru.sink_q.ppltrades.compat.rei.PpltradesReiPlugin"
+    ],
     "modmenu": [
       "ru.sink_q.ppltrades.compat.modmenu.PpltradesModMenu"
     ]
@@ -35,6 +38,7 @@
   "suggests": {
     "pochatok": "*",
     "jei": "*",
+    "roughlyenoughitems": "*",
     "modmenu": "*",
     "cloth-config": "*"
   }

@@ -89,6 +89,11 @@ final class PpltradesConfigScreen {
                 .setTooltip(text("collect_prices.tooltip"))
                 .setSaveConsumer(value -> config.collectPrices = value)
                 .build());
+        prices.addEntry(entries.startBooleanToggle(text("report_sold_out_on_close"), config.reportSoldOutOnClose)
+                .setDefaultValue(true)
+                .setTooltip(text("report_sold_out_on_close.tooltip"))
+                .setSaveConsumer(value -> config.reportSoldOutOnClose = value)
+                .build());
         prices.addEntry(entries.startStrField(text("api_url"), config.apiUrl)
                 .setDefaultValue(PpltradesConfig.DEFAULT_API_URL)
                 .setTooltip(text("api_url.tooltip"))

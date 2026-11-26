@@ -27,6 +27,8 @@
   "ppltrades.config.show_prices.tooltip": "Show price statistics in tooltips while holding Shift on PepeLand.",
   "ppltrades.config.collect_prices": "Send price reports",
   "ppltrades.config.collect_prices.tooltip": "Send item details, coordinates, and sign text from opened shop barrels to the price service.",
+  "ppltrades.config.report_sold_out_on_close": "Report buyouts on close",
+  "ppltrades.config.report_sold_out_on_close.tooltip": "If you bought out the whole stock while the barrel was open, report it as sold out when you close it, so the listing disappears from the site.",
   "ppltrades.config.api_url": "Price service URL",
   "ppltrades.config.api_url.tooltip": "Use an HTTPS base URL without credentials, query parameters, or fragment. Leave blank to disable fetching and sending price data. URL changes take effect after restarting the game.",
   "ppltrades.config.api_url.invalid": "Enter a valid https:// URL without credentials, query parameters, or fragment, or leave it blank.",

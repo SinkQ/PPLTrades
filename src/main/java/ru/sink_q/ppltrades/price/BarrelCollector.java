@@ -48,8 +48,13 @@ public final class BarrelCollector {
     private static final int MAX_CANDIDATES = 10;
 
     private static Pending pending;
+    /** Бочка с товаром, о которой уже отправлен отчёт: ждём закрытия, чтобы заметить выкуп. */
+    private static Watched watched;
 
     private record Pending(ChestMenu menu, BlockPos barrelPos, Level level, int[] ticks) {
+    }
+
+    private record Watched(ChestMenu menu, BlockPos barrelPos, Level level) {
     }
 
     private BarrelCollector() {
@@ -71,6 +76,7 @@ public final class BarrelCollector {
 
     /** Вызывается каждый клиентский тик. */
     public static void tick(Minecraft mc) {
+        tickWatched(mc);
         Pending p = pending;
         if (p == null) {
             return;
@@ -88,6 +94,30 @@ public final class BarrelCollector {
         pending = null;
         JsonObject report = buildReport(p.level(), p.barrelPos(), p.menu().getContainer());
         if (report != null) {
+            PriceApi.enqueue(report);
+            if (!report.has("empty")) {
+                watched = new Watched(p.menu(), p.barrelPos(), p.level());
+            }
+        }
+    }
+
+    /**
+     * Отчёт отправляется при открытии, поэтому выкуп всего товара за один заход иначе не виден до
+     * следующего открытия бочки (issue #1). При закрытии смотрим последнее содержимое меню: если товара
+     * не осталось, отправляем «распродано». Сервер записывает отчёты по порядку, поэтому даже в одной
+     * пачке с отчётом об открытии последним считается пустой.
+     */
+    private static void tickWatched(Minecraft mc) {
+        Watched w = watched;
+        if (w == null || (mc.player != null && mc.player.containerMenu == w.menu() && mc.level == w.level())) {
+            return;
+        }
+        watched = null;
+        if (mc.player == null || mc.level != w.level() || !ru.sink_q.ppltrades.PpltradesConfig.get().reportSoldOutOnClose) {
+            return; // вышли из мира: содержимое бочки неизвестно
+        }
+        JsonObject report = buildReport(w.level(), w.barrelPos(), w.menu().getContainer());
+        if (report != null && report.has("empty")) {
             PriceApi.enqueue(report);
         }
     }
